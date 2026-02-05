@@ -11,7 +11,7 @@ import time
 from flask import Blueprint, jsonify, request
 
 from pymongo import MongoClient
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlsplit, urlunsplit, unquote_plus
 
 
 def read_env_value(key, default=""):
@@ -50,7 +50,28 @@ OPENTRIPMAP_API_KEY = read_env_value("OPENTRIPMAP_API_KEY", "").strip()
 username = quote_plus("nate")
 password = quote_plus("Simba234")
 DEFAULT_URI = f"mongodb+srv://{username}:{password}@pathease.1vbi85h.mongodb.net/patheaseDB"
-MONGO_URI = read_env_value("PATHEASE_MONGO_URI", DEFAULT_URI)
+
+def normalize_mongo_uri(uri):
+    if not uri:
+        return uri
+    try:
+        parts = urlsplit(uri)
+        if parts.scheme not in ("mongodb", "mongodb+srv"):
+            return uri
+        if "@" not in parts.netloc:
+            return uri
+        userinfo, hostinfo = parts.netloc.rsplit("@", 1)
+        if ":" not in userinfo:
+            return uri
+        user, pwd = userinfo.split(":", 1)
+        user = quote_plus(unquote_plus(user))
+        pwd = quote_plus(unquote_plus(pwd))
+        netloc = f"{user}:{pwd}@{hostinfo}"
+        return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+    except Exception:
+        return uri
+
+MONGO_URI = normalize_mongo_uri(read_env_value("PATHEASE_MONGO_URI", DEFAULT_URI))
 client = MongoClient(MONGO_URI) if MONGO_URI else None
 db = client["patheaseDB"] if client is not None else None
 places_collection = db["places"] if db is not None else None

@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify, send_from_directory, abort
 from flask_cors import CORS
 from pymongo import MongoClient
-from urllib.parse import quote_plus
+from urllib.parse import quote_plus, urlsplit, urlunsplit, unquote_plus
 from werkzeug.utils import secure_filename
 from bson import ObjectId, Binary
 from bson.errors import InvalidId
@@ -30,7 +30,29 @@ JWT_SECRET = os.environ.get("PATHEASE_JWT_SECRET", "replace_this_with_a_real_sec
 # ---------------- MONGO ----------------
 username = quote_plus("nate")
 password = quote_plus("Simba234")
-mongo_uri = f"mongodb+srv://{username}:{password}@pathease.1vbi85h.mongodb.net/patheaseDB"
+def normalize_mongo_uri(uri):
+    if not uri:
+        return uri
+    try:
+        parts = urlsplit(uri)
+        if parts.scheme not in ("mongodb", "mongodb+srv"):
+            return uri
+        if "@" not in parts.netloc:
+            return uri
+        userinfo, hostinfo = parts.netloc.rsplit("@", 1)
+        if ":" not in userinfo:
+            return uri
+        user, pwd = userinfo.split(":", 1)
+        user = quote_plus(unquote_plus(user))
+        pwd = quote_plus(unquote_plus(pwd))
+        netloc = f"{user}:{pwd}@{hostinfo}"
+        return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+    except Exception:
+        return uri
+
+mongo_uri = normalize_mongo_uri(
+    f"mongodb+srv://{username}:{password}@pathease.1vbi85h.mongodb.net/patheaseDB"
+)
 client = MongoClient(mongo_uri)
 db = client["patheaseDB"]
 
