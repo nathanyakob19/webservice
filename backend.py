@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify, send_from_directory, abort
 from flask_cors import CORS
 from pymongo import MongoClient
+from urllib.parse import quote_plus
 from werkzeug.utils import secure_filename
 from bson import ObjectId, Binary
 from bson.errors import InvalidId
@@ -24,31 +25,12 @@ app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 # Register AI blueprint (modular add-on)
 app.register_blueprint(ai_features)
 
-def read_env_value(key, default=""):
-    if os.environ.get(key):
-        return os.environ.get(key)
-    env_path = os.path.join(os.path.dirname(__file__), ".env")
-    try:
-        with open(env_path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                k, v = line.split("=", 1)
-                if k.strip() == key:
-                    return v.strip()
-    except Exception:
-        pass
-    return default
-
-JWT_SECRET = read_env_value("PATHEASE_JWT_SECRET", "").strip()
-if not JWT_SECRET:
-    raise RuntimeError("Missing PATHEASE_JWT_SECRET environment variable.")
+JWT_SECRET = os.environ.get("PATHEASE_JWT_SECRET", "replace_this_with_a_real_secret")
 
 # ---------------- MONGO ----------------
-mongo_uri = read_env_value("PATHEASE_MONGO_URI", "").strip()
-if not mongo_uri:
-    raise RuntimeError("Missing PATHEASE_MONGO_URI environment variable.")
+username = quote_plus("nate")
+password = quote_plus("Simba234")
+mongo_uri = f"mongodb+srv://{username}:{password}@pathease.1vbi85h.mongodb.net/patheaseDB"
 client = MongoClient(mongo_uri)
 db = client["patheaseDB"]
 

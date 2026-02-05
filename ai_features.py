@@ -47,7 +47,10 @@ _rates_cache = {"base": "INR", "rates": {}, "ts": 0}
 OPENTRIPMAP_API_KEY = read_env_value("OPENTRIPMAP_API_KEY", "").strip()
 
 # ---------------- DB (SAME DB AS backend.py) ----------------
-MONGO_URI = read_env_value("PATHEASE_MONGO_URI", "").strip()
+username = quote_plus("nate")
+password = quote_plus("Simba234")
+DEFAULT_URI = f"mongodb+srv://{username}:{password}@pathease.1vbi85h.mongodb.net/patheaseDB"
+MONGO_URI = read_env_value("PATHEASE_MONGO_URI", DEFAULT_URI)
 client = MongoClient(MONGO_URI) if MONGO_URI else None
 db = client["patheaseDB"] if client is not None else None
 places_collection = db["places"] if db is not None else None
