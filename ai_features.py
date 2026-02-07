@@ -51,6 +51,22 @@ username = quote_plus("nate")
 password = quote_plus("Simba234")
 DEFAULT_URI = f"mongodb+srv://{username}:{password}@pathease.1vbi85h.mongodb.net/patheaseDB"
 
+def _redact_mongo_uri(uri):
+    if not uri:
+        return uri
+    try:
+        parts = urlsplit(uri)
+        if "@" not in parts.netloc:
+            return uri
+        userinfo, hostinfo = parts.netloc.rsplit("@", 1)
+        if ":" not in userinfo:
+            return uri
+        user, _pwd = userinfo.split(":", 1)
+        netloc = f"{user}:***@{hostinfo}"
+        return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+    except Exception:
+        return "<invalid_mongo_uri>"
+
 def normalize_mongo_uri(uri):
     if not uri:
         return uri
@@ -71,7 +87,10 @@ def normalize_mongo_uri(uri):
     except Exception:
         return uri
 
-MONGO_URI = normalize_mongo_uri(read_env_value("PATHEASE_MONGO_URI", DEFAULT_URI))
+# Prefer PATHEASE_MONGO_URI, then MONGO_URI, then DEFAULT_URI
+_env_mongo_uri = read_env_value("PATHEASE_MONGO_URI", "").strip() or read_env_value("MONGO_URI", "").strip()
+MONGO_URI = normalize_mongo_uri(_env_mongo_uri or DEFAULT_URI)
+print("Mongo URI in use:", _redact_mongo_uri(MONGO_URI))
 client = MongoClient(MONGO_URI) if MONGO_URI else None
 db = client["patheaseDB"] if client is not None else None
 places_collection = db["places"] if db is not None else None
@@ -341,126 +360,134 @@ def fallback_itinerary(destination, days, budget, lang):
 # ---------------- ROUTE (EXTENDED, NOT REPLACED) ----------------
 @ai_features.route("/ai/trip-planner", methods=["POST"])
 def trip_planner():
-    data = request.get_json(silent=True) or {}
-    print("DEBUG BODY:", data)
-
-    destination = (data.get("destination") or "").strip()
-    if not destination:
-        return jsonify({"error": "Destination required"}), 400
-
-    days = safe_int(data.get("days", 1))
-    budget = safe_float(data.get("budget", 0))
-    lang = normalize_lang(data.get("language", "en"))
-    currency = (data.get("currency") or "INR").upper()
-    travel_type = (data.get("travel_type") or "leisure").strip()
-    interests = data.get("interests") or []
-
-    if data.get("lat") is None or data.get("lng") is None:
-        return jsonify({"error": "Current location required (lat/lng)."}), 400
-
-    # 🔥 NEW LOGIC
-    places = get_places(data)
-
-    if places:
-        # distribute all places across days, distance-sorted
-        per_day = max(1, math.ceil(len(places) / days))
-        itinerary = []
-        idx = 0
-
-        def fmt_place(p):
-            name = p.get("placeName", "Place")
-            dist = p.get("distance")
-            if dist is not None and dist < 99999:
-                return f"{name} ({dist:.1f} km)"
-            return name
-
-        for d in range(1, days + 1):
-            day_places = places[idx: idx + per_day]
-            idx += per_day
-
-            day_cost = round(budget / days, 2) if budget else 0
-            day_cost_converted = convert_amount(day_cost, "INR", currency) if budget else 0
-
-            # distance for this day (from current location if provided)
-            day_distance = None
-            if data.get("lat") is not None and data.get("lng") is not None:
-                day_distance = path_distance_km(float(data["lat"]), float(data["lng"]), day_places)
-
-            stops = []
-            for p in day_places[:3]:
-                loc = p.get("location") or {}
-                stops.append({
-                    "name": p.get("placeName", "Place"),
-                    "lat": float(loc["lat"]) if "lat" in loc else None,
-                    "lng": float(loc["lng"]) if "lng" in loc else None,
-                    "distance_km": round(p.get("distance", 0), 2) if p.get("distance") is not None else None
+    try:
+        data = request.get_json(silent=True) or {}
+        print("DEBUG BODY:", data)
+    
+        destination = (data.get("destination") or "").strip()
+        if not destination:
+            return jsonify({"error": "Destination required"}), 400
+    
+        days = safe_int(data.get("days", 1))
+        budget = safe_float(data.get("budget", 0))
+        lang = normalize_lang(data.get("language", "en"))
+        currency = (data.get("currency") or "INR").upper()
+        travel_type = (data.get("travel_type") or "leisure").strip()
+        interests = data.get("interests") or []
+    
+        if data.get("lat") is None or data.get("lng") is None:
+            return jsonify({"error": "Current location required (lat/lng)."}), 400
+        try:
+            _lat = float(data.get("lat"))
+            _lng = float(data.get("lng"))
+        except Exception:
+            return jsonify({"error": "Invalid lat/lng. Must be numbers."}), 400
+    
+        # 🔥 NEW LOGIC
+        places = get_places(data)
+    
+        if places:
+            # distribute all places across days, distance-sorted
+            per_day = max(1, math.ceil(len(places) / days))
+            itinerary = []
+            idx = 0
+    
+            def fmt_place(p):
+                name = p.get("placeName", "Place")
+                dist = p.get("distance")
+                if dist is not None and dist < 99999:
+                    return f"{name} ({dist:.1f} km)"
+                return name
+    
+            for d in range(1, days + 1):
+                day_places = places[idx: idx + per_day]
+                idx += per_day
+    
+                day_cost = round(budget / days, 2) if budget else 0
+                day_cost_converted = convert_amount(day_cost, "INR", currency) if budget else 0
+    
+                # distance for this day (from current location if provided)
+                day_distance = None
+                if data.get("lat") is not None and data.get("lng") is not None:
+                    day_distance = path_distance_km(float(data["lat"]), float(data["lng"]), day_places)
+    
+                stops = []
+                for p in day_places[:3]:
+                    loc = p.get("location") or {}
+                    stops.append({
+                        "name": p.get("placeName", "Place"),
+                        "lat": float(loc["lat"]) if "lat" in loc else None,
+                        "lng": float(loc["lng"]) if "lng" in loc else None,
+                        "distance_km": round(p.get("distance", 0), 2) if p.get("distance") is not None else None
+                    })
+    
+                itinerary.append({
+                    "day": d,
+                    "title": f"{DAY_LABELS[lang]} {d}: Explore {destination}",
+                    "morning": fmt_place(day_places[0]) if len(day_places) > 0 else "",
+                    "afternoon": fmt_place(day_places[1]) if len(day_places) > 1 else "",
+                    "evening": fmt_place(day_places[2]) if len(day_places) > 2 else "",
+                    "tips": "",
+                    "est_cost": day_cost_converted,
+                    "currency": currency,
+                    "currency_symbol": CURRENCY_SYMBOLS.get(currency, currency + " "),
+                    "day_distance_km": day_distance,
+                    "stops": stops
                 })
-
-            itinerary.append({
-                "day": d,
-                "title": f"{DAY_LABELS[lang]} {d}: Explore {destination}",
-                "morning": fmt_place(day_places[0]) if len(day_places) > 0 else "",
-                "afternoon": fmt_place(day_places[1]) if len(day_places) > 1 else "",
-                "evening": fmt_place(day_places[2]) if len(day_places) > 2 else "",
-                "tips": "",
-                "est_cost": day_cost_converted,
-                "currency": currency,
-                "currency_symbol": CURRENCY_SYMBOLS.get(currency, currency + " "),
-                "day_distance_km": day_distance,
-                "stops": stops
+    
+            tips_list = generate_day_tips(
+                itinerary,
+                destination,
+                budget,
+                travel_type,
+                interests,
+                currency,
+            )
+            for i, t in enumerate(tips_list):
+                if i < len(itinerary):
+                    itinerary[i]["tips"] = t
+    
+            start_point = None
+            if data.get("lat") is not None and data.get("lng") is not None:
+                start_point = {
+                    "lat": float(data["lat"]),
+                    "lng": float(data["lng"]),
+                    "label": data.get("location_label") or "Current Location",
+                }
+    
+            nearest = None
+            if places and places[0].get("distance", 99999) < 99999:
+                nearest = {
+                    "placeName": places[0].get("placeName"),
+                    "distance_km": round(places[0].get("distance", 0), 2)
+                }
+    
+            total_distance = None
+            if start_point:
+                total_distance = path_distance_km(start_point["lat"], start_point["lng"], places)
+    
+            return jsonify({
+                "source": "db",
+                "itinerary": itinerary,
+                "places_used": [p.get("placeName") for p in places],
+                "start_from": start_point,
+                "nearest_place": nearest,
+                "total_distance_km": total_distance,
+                "cost_breakdown": split_budget(convert_amount(budget, "INR", currency), currency)
             })
-
-        tips_list = generate_day_tips(
-            itinerary,
-            destination,
-            budget,
-            travel_type,
-            interests,
-            currency,
-        )
-        for i, t in enumerate(tips_list):
-            if i < len(itinerary):
-                itinerary[i]["tips"] = t
-
-        start_point = None
-        if data.get("lat") is not None and data.get("lng") is not None:
-            start_point = {
-                "lat": float(data["lat"]),
-                "lng": float(data["lng"]),
-                "label": data.get("location_label") or "Current Location",
-            }
-
-        nearest = None
-        if places and places[0].get("distance", 99999) < 99999:
-            nearest = {
-                "placeName": places[0].get("placeName"),
-                "distance_km": round(places[0].get("distance", 0), 2)
-            }
-
-        total_distance = None
-        if start_point:
-            total_distance = path_distance_km(start_point["lat"], start_point["lng"], places)
-
+    
+        # 🔁 EXISTING AI FALLBACK
+        system_prompt = "You are a travel planner."
+        user_prompt = f"Plan a {days}-day trip to {destination} with budget {budget}."
+    
+        content, err = call_llm(system_prompt, user_prompt)
+        if content:
+            return jsonify({"source": "llm", "plan": content})
+    
         return jsonify({
-            "source": "db",
-            "itinerary": itinerary,
-            "places_used": [p.get("placeName") for p in places],
-            "start_from": start_point,
-            "nearest_place": nearest,
-            "total_distance_km": total_distance,
-            "cost_breakdown": split_budget(convert_amount(budget, "INR", currency), currency)
+            "source": "fallback",
+            "itinerary": fallback_itinerary(destination, days, budget, lang),
+            "error": err
         })
-
-    # 🔁 EXISTING AI FALLBACK
-    system_prompt = "You are a travel planner."
-    user_prompt = f"Plan a {days}-day trip to {destination} with budget {budget}."
-
-    content, err = call_llm(system_prompt, user_prompt)
-    if content:
-        return jsonify({"source": "llm", "plan": content})
-
-    return jsonify({
-        "source": "fallback",
-        "itinerary": fallback_itinerary(destination, days, budget, lang),
-        "error": err
-    })
+    except Exception as e:
+        return jsonify({"error": "Internal server error", "details": str(e)}), 500
