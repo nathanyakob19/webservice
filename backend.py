@@ -49,6 +49,27 @@ def normalize_mongo_uri(uri):
         return uri
 
 
+def _redact_mongo_uri(uri):
+    if not uri:
+        return uri
+    try:
+        parts = urlsplit(uri)
+        if "@" not in parts.netloc:
+            return uri
+        userinfo, hostinfo = parts.netloc.rsplit("@", 1)
+        if ":" not in userinfo:
+            return uri
+        user, _pwd = userinfo.split(":", 1)
+        netloc = f"{user}:***@{hostinfo}"
+        return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+    except Exception:
+        return "<invalid_mongo_uri>"
+
+_env_mongo_uri = (os.environ.get("PATHEASE_MONGO_URI", "").strip() or os.environ.get("MONGO_URI", "").strip())
+mongo_uri = normalize_mongo_uri(_env_mongo_uri)
+if not mongo_uri:
+    raise RuntimeError("PATHEASE_MONGO_URI or MONGO_URI must be set")
+print("Mongo URI in use:", _redact_mongo_uri(mongo_uri))
 client = MongoClient(mongo_uri)
 db = client["patheaseDB"]
 
