@@ -221,6 +221,69 @@ def split_budget(budget, currency="INR"):
         "misc": round(budget * 0.05, 2),
     }
 
+# ---------------- SIMPLE CHAT + SENTIMENT ----------------
+_POS_WORDS = {
+    "good", "great", "amazing", "awesome", "love", "loved", "nice", "excellent",
+    "fantastic", "beautiful", "wonderful", "friendly", "clean", "safe", "helpful",
+    "pleasant", "enjoyed", "enjoy", "best",
+}
+_NEG_WORDS = {
+    "bad", "terrible", "awful", "hate", "hated", "poor", "dirty", "unsafe",
+    "worst", "boring", "rude", "slow", "expensive", "crowded", "noisy",
+    "disappointed", "disappointing",
+}
+
+def _basic_sentiment(text):
+    tokens = re.findall(r"[a-zA-Z']+", text.lower())
+    pos = sum(1 for t in tokens if t in _POS_WORDS)
+    neg = sum(1 for t in tokens if t in _NEG_WORDS)
+    total = max(1, len(tokens))
+    score = round((pos - neg) / total, 3)
+    if score > 0.1:
+        label = "positive"
+    elif score < -0.1:
+        label = "negative"
+    else:
+        label = "neutral"
+    return {"label": label, "score": score, "word_count": len(tokens)}
+
+@ai_features.route("/ai/guide-chat", methods=["POST"])
+def guide_chat():
+    data = request.get_json(silent=True) or {}
+    message = (data.get("message") or "").strip()
+    destination = (data.get("destination") or "").strip()
+    language = normalize_lang(data.get("language") or "en")
+    if not message:
+        return jsonify({"error": "Message is required"}), 400
+
+    system_prompt = (
+        "You are Pathease, an intelligent AI-powered tourism assistant. "
+        "Provide short, helpful travel guidance."
+    )
+    user_prompt = f"Message: {message}\nDestination: {destination or 'Not specified'}\nLanguage: {language}"
+    content, _err = call_llm(system_prompt, user_prompt)
+    if content:
+        return jsonify({"reply": content.strip()})
+
+    lower_msg = message.lower()
+    reply = "I am Pathease, your virtual travel guide. How can I help you plan your trip?"
+    if "itinerary" in lower_msg or "plan" in lower_msg:
+        reply = "I can help build an itinerary. Tell me your destination, days, and budget."
+    elif "hello" in lower_msg or "hi" in lower_msg:
+        reply = "Hello! Where would you like to travel today?"
+    elif destination:
+        reply = f"{destination} is a great choice. Want attractions, food spots, or a day plan?"
+
+    return jsonify({"reply": reply})
+
+@ai_features.route("/ai/sentiment", methods=["POST"])
+def sentiment():
+    data = request.get_json(silent=True) or {}
+    text = (data.get("text") or "").strip()
+    if not text:
+        return jsonify({"error": "Text is required"}), 400
+    return jsonify(_basic_sentiment(text))
+
 # ---------------- FREE AI (UNCHANGED) ----------------
 def call_llm(system_prompt, user_prompt):
     api_key = os.environ.get("LLM_API_KEY")

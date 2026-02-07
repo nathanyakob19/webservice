@@ -15,7 +15,7 @@ from ai_features import ai_features
 
 # ---------------- APP SETUP ----------------
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={r"/*": {"origins": "*"}})
 
 # ---------------- CONFIG ----------------
 UPLOAD_FOLDER = os.path.join(app.root_path, "uploads")
@@ -27,9 +27,7 @@ app.register_blueprint(ai_features)
 
 JWT_SECRET = os.environ.get("PATHEASE_JWT_SECRET", "replace_this_with_a_real_secret")
 
-# ---------------- MONGO ----------------
-username = quote_plus("nate")
-password = quote_plus("Simba234")
+
 def normalize_mongo_uri(uri):
     if not uri:
         return uri
@@ -50,9 +48,7 @@ def normalize_mongo_uri(uri):
     except Exception:
         return uri
 
-mongo_uri = normalize_mongo_uri(
-    f"mongodb+srv://{username}:{password}@pathease.1vbi85h.mongodb.net/patheaseDB"
-)
+
 client = MongoClient(mongo_uri)
 db = client["patheaseDB"]
 
