@@ -7,6 +7,7 @@ from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 import math
 import time
+import traceback
 
 from flask import Blueprint, jsonify, request
 
@@ -198,8 +199,11 @@ def path_distance_km(start_lat, start_lng, places):
     for p in places:
         loc = p.get("location") or {}
         if "lat" in loc and "lng" in loc:
-            lat = float(loc["lat"])
-            lng = float(loc["lng"])
+            try:
+                lat = float(loc["lat"])
+                lng = float(loc["lng"])
+            except Exception:
+                continue
             total += haversine(prev_lat, prev_lng, lat, lng)
             prev_lat, prev_lng = lat, lng
     return round(total, 2)
@@ -291,13 +295,23 @@ def get_places(data):
 
     # 1) Selected places (highest priority)
     if selected_places:
-        return list(places_collection.find(
-            {"placeName": {"$in": selected_places}, "approved": True},
-            {"_id": 0}
-        ))
+        try:
+            return list(places_collection.find(
+                {"placeName": {"$in": selected_places}, "approved": True},
+                {"_id": 0}
+            ))
+        except Exception:
+            print("ERROR: get_places selected_places query failed")
+            print(traceback.format_exc())
+            return []
 
     # 2) Destination-based (use city field first, then fallback to name/description match)
-    all_places = list(places_collection.find({"approved": True}, {"_id": 0}))
+    try:
+        all_places = list(places_collection.find({"approved": True}, {"_id": 0}))
+    except Exception:
+        print("ERROR: get_places approved query failed")
+        print(traceback.format_exc())
+        return []
 
     if destination:
         dest_lower = destination.lower()
@@ -327,7 +341,10 @@ def get_places(data):
         for p in places:
             loc = p.get("location") or {}
             if "lat" in loc and "lng" in loc:
-                coords.append((float(loc["lat"]), float(loc["lng"])))
+                try:
+                    coords.append((float(loc["lat"]), float(loc["lng"])))
+                except Exception:
+                    continue
         if coords:
             ref_lat = sum(c[0] for c in coords) / len(coords)
             ref_lng = sum(c[1] for c in coords) / len(coords)
@@ -414,10 +431,20 @@ def trip_planner():
                 stops = []
                 for p in day_places[:3]:
                     loc = p.get("location") or {}
+                    stop_lat = None
+                    stop_lng = None
+                    try:
+                        if "lat" in loc:
+                            stop_lat = float(loc["lat"])
+                        if "lng" in loc:
+                            stop_lng = float(loc["lng"])
+                    except Exception:
+                        stop_lat = None
+                        stop_lng = None
                     stops.append({
                         "name": p.get("placeName", "Place"),
-                        "lat": float(loc["lat"]) if "lat" in loc else None,
-                        "lng": float(loc["lng"]) if "lng" in loc else None,
+                        "lat": stop_lat,
+                        "lng": stop_lng,
                         "distance_km": round(p.get("distance", 0), 2) if p.get("distance") is not None else None
                     })
     
@@ -490,4 +517,6 @@ def trip_planner():
             "error": err
         })
     except Exception as e:
+        print("ERROR: /ai/trip-planner exception")
+        print(traceback.format_exc())
         return jsonify({"error": "Internal server error", "details": str(e)}), 500
