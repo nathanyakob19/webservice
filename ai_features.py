@@ -72,18 +72,17 @@ def normalize_mongo_uri(uri):
     if not uri:
         return uri
     try:
+        uri = "".join(str(uri).split())
         parts = urlsplit(uri)
         if parts.scheme not in ("mongodb", "mongodb+srv"):
             return uri
         if "@" not in parts.netloc:
             return uri
         userinfo, hostinfo = parts.netloc.rsplit("@", 1)
-        if ":" not in userinfo:
-            return uri
-        user, pwd = userinfo.split(":", 1)
+        user, pwd = (userinfo.split(":", 1) + [""])[:2]
         user = quote_plus(unquote_plus(user))
-        pwd = quote_plus(unquote_plus(pwd))
-        netloc = f"{user}:{pwd}@{hostinfo}"
+        pwd = quote_plus(unquote_plus(pwd)) if pwd else ""
+        netloc = f"{user}:{pwd}@{hostinfo}" if pwd else f"{user}@{hostinfo}"
         return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
     except Exception:
         return uri
