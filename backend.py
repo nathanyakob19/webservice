@@ -28,6 +28,11 @@ app.register_blueprint(ai_features)
 JWT_SECRET = os.environ.get("PATHEASE_JWT_SECRET", "replace_this_with_a_real_secret")
 
 
+@app.route("/")
+def root():
+    return jsonify({"status": "ok", "service": "Pathease API"})
+
+
 def normalize_mongo_uri(uri):
     if not uri:
         return uri
