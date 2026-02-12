@@ -71,7 +71,7 @@ def _redact_mongo_uri(uri):
 
 _env_mongo_uri = (os.environ.get("PATHEASE_MONGO_URI", "").strip() or os.environ.get("MONGO_URI", "").strip())
 mongo_uri = normalize_mongo_uri(_env_mongo_uri)
-if not mongo_uri:
+if not mongo_uri: ew
     raise RuntimeError("PATHEASE_MONGO_URI or MONGO_URI must be set")
 print("Mongo URI in use:", _redact_mongo_uri(mongo_uri))
 client = MongoClient(mongo_uri)
