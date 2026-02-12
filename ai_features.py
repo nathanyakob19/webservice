@@ -290,16 +290,125 @@ def guide_chat():
     if content:
         return jsonify({"reply": content.strip()})
 
-    lower_msg = message.lower()
-    reply = "I am Pathease, your virtual travel guide. How can I help you plan your trip?"
-    if "itinerary" in lower_msg or "plan" in lower_msg:
-        reply = "I can help build an itinerary. Tell me your destination, days, and budget."
-    elif "hello" in lower_msg or "hi" in lower_msg:
-        reply = "Hello! Where would you like to travel today?"
-    elif destination:
-        reply = f"{destination} is a great choice. Want attractions, food spots, or a day plan?"
+    def _extract_params(text, existing_dest):
+        dest = existing_dest
+        days = None
+        budget = None
+        modes = set()
+        t = text.lower()
+        m = re.search(r"destination\s*:\s*([a-zA-Z ,\-]+)", text, re.I)
+        if m:
+            dest = m.group(1).strip()
+        m = re.search(r"days?\s*:\s*(\d+)", text, re.I)
+        if m:
+            try:
+                days = int(m.group(1))
+            except Exception:
+                days = None
+        m = re.search(r"budget\s*:\s*([\d,\.]+)", text, re.I)
+        if m:
+            try:
+                budget = float(m.group(1).replace(",", ""))
+            except Exception:
+                budget = None
+        for kw in ["family", "couple", "solo", "student", "luxury", "adventure", "cultural", "accessible", "hidden gems", "budget"]:
+            if kw in t:
+                modes.add(kw)
+        return dest, days, budget, modes
 
-    return jsonify({"reply": reply})
+    def _best_time_for_city(name):
+        n = (name or "").lower()
+        if "mumbai" in n:
+            return "Nov–Feb (cooler, drier); Jun–Sep monsoon with heavy rain"
+        if "goa" in n:
+            return "Nov–Feb for beaches; Jun–Sep monsoon for lush landscapes"
+        if "delhi" in n:
+            return "Oct–Mar (pleasant); Apr–Jun very hot"
+        return "Depends on region; generally spring and autumn are comfortable"
+
+    def _why_visit(name):
+        n = (name or "").strip()
+        if not n:
+            return "Vibrant culture, local cuisine, and accessible attractions."
+        ln = n.lower()
+        if "mumbai" in ln:
+            return "Coastal city with Marine Drive, heritage architecture, Bollywood culture, and legendary street food."
+        if "goa" in ln:
+            return "Beaches, Portuguese heritage, seafood, and relaxed nightlife."
+        if "delhi" in ln:
+            return "Historic monuments, museums, markets, and diverse food."
+        return f"Known for local culture, food, landmarks, and unique neighborhood vibes in {n}."
+
+    def _budget_band(b):
+        if b is None or b <= 0:
+            return "Low: < 5,000; Mid: 5,000–15,000; High: > 15,000 (approx, INR)"
+        if b < 5000:
+            return "Low"
+        if b <= 15000:
+            return "Mid"
+        return "High"
+
+    def _structured_response(dest, days, budget, modes, lang):
+        d = (dest or "").strip() or "your destination"
+        dy = days or 3
+        bd = budget or 0
+        itin = fallback_itinerary(d, dy, bd, lang)
+        band = _budget_band(bd)
+        lines = []
+        lines.append("Overview")
+        lines.append(f"{d.title()} trip tailored to your preferences. Focus: " + (", ".join(sorted(modes)) if modes else "general travel").title())
+        lines.append("")
+        lines.append("Why Visit")
+        lines.append(_why_visit(dest))
+        lines.append("")
+        lines.append("Best Time to Visit")
+        lines.append(_best_time_for_city(dest))
+        lines.append("")
+        lines.append("Budget Estimate")
+        if bd and bd > 0:
+            lines.append(f"Approx total: {int(bd)} INR ({band}). Breakdown may include stay, food, transport, tickets, misc.")
+        else:
+            lines.append(f"Range: Low/Mid/High — {band}. Provide a budget for tailored splits.")
+        lines.append("")
+        lines.append("3–5 Day Itinerary")
+        for dday in itin:
+            lines.append(f"Day {dday['day']}")
+            lines.append(f"Morning: {dday['morning'] or 'Explore a landmark'}")
+            lines.append(f"Afternoon: {dday['afternoon'] or 'Local food + market'}")
+            lines.append(f"Evening: {dday['evening'] or 'Waterfront walk / cultural show'}")
+            lines.append("Tips: " + (dday.get("tips") or "Carry water, plan buffer, check opening hours."))
+            lines.append("")
+        lines.append("Travel Tips")
+        tips = []
+        if "budget" in modes:
+            tips.append("Use public transport and free attractions; eat at local joints.")
+        if "luxury" in modes:
+            tips.append("Book premium stays, fine dining, and private transfers.")
+        if "adventure" in modes:
+            tips.append("Add trekking, cycling, or water sports with certified operators.")
+        if "cultural" in modes:
+            tips.append("Visit museums, heritage walks, and local performances.")
+        if "accessible" in modes:
+            tips.append("Prefer wheelchair-friendly venues; confirm ramps and elevators.")
+        if not tips:
+            tips.append("Buy tickets online, start early, and check local advisories.")
+        lines.append("• " + " • ".join(tips))
+        lines.append("")
+        lines.append("Optional Upgrades")
+        lines.append("Private guide, express entry tickets, curated food tour, or sunset cruise (availability varies).")
+        return "\n".join(lines)
+
+    dest, d_days, d_budget, d_modes = _extract_params(message, destination)
+    want_itin = any(k in message.lower() for k in ["itinerary", "day plan", "plan"])
+    want_food = "food" in message.lower()
+    want_attr = "attraction" in message.lower()
+
+    if want_itin or d_days or d_budget:
+        return jsonify({"reply": _structured_response(dest, d_days, d_budget, d_modes, language)})
+    if want_food and dest:
+        reply = _structured_response(dest, None, d_budget, d_modes.union({"cultural"}), language)
+        return jsonify({"reply": reply})
+    return jsonify({"reply": _structured_response(dest, None, d_budget, d_modes, language)})
 
 @ai_features.route("/ai/sentiment", methods=["POST"])
 def sentiment():
