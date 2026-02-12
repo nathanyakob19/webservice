@@ -339,6 +339,58 @@ def guide_chat():
             return "Historic monuments, museums, markets, and diverse food."
         return f"Known for local culture, food, landmarks, and unique neighborhood vibes in {n}."
 
+    def _city_info(name):
+        n = (name or "").lower().strip()
+        if "mumbai" in n:
+            return {
+                "best_time": "Nov–Feb; expect heavy monsoon Jun–Sep",
+                "why": "Marine Drive promenade, Gateway of India, heritage architecture, film culture, and iconic street food.",
+                "attractions": [
+                    "Marine Drive",
+                    "Gateway of India",
+                    "Colaba Causeway",
+                    "Chhatrapati Shivaji Terminus",
+                    "Sanjay Gandhi National Park",
+                    "Elephanta Caves (ferry from Gateway)",
+                    "Bandra Fort & Bandstand",
+                    "Siddhivinayak Temple",
+                    "Juhu Beach",
+                    "Prince of Wales Museum",
+                ],
+                "food_spots": [
+                    "Vada Pav at Ashok Vada Pav (Dadar)",
+                    "Pav Bhaji at Sardar Refreshments (Tardeo)",
+                    "Seafood at Gajalee (Vile Parle)",
+                    "Kebabs at Bademiya (Colaba)",
+                    "Street chaat at Girgaum Chowpatty",
+                    "Irani cafe snacks at Kyani & Co (Marine Lines)",
+                    "South Indian at Cafe Madras (Matunga)",
+                ],
+                "itinerary": [
+                    {
+                        "morning": "Gateway of India & ferry views",
+                        "afternoon": "Colaba Causeway shopping + Prince of Wales Museum",
+                        "evening": "Marine Drive sunset walk",
+                    },
+                    {
+                        "morning": "Elephanta Caves trip",
+                        "afternoon": "Girgaum Chowpatty street food",
+                        "evening": "Marine Drive or Nariman Point",
+                    },
+                    {
+                        "morning": "Sanjay Gandhi National Park or Kanheri Caves",
+                        "afternoon": "Bandra Fort & Bandstand",
+                        "evening": "Juhu Beach",
+                    },
+                    {
+                        "morning": "Siddhivinayak Temple",
+                        "afternoon": "Kala Ghoda art district",
+                        "evening": "Food trail at Bademiya/Colaba",
+                    },
+                ],
+            }
+        return None
+
     def _budget_band(b):
         if b is None or b <= 0:
             return "Low: < 5,000; Mid: 5,000–15,000; High: > 15,000 (approx, INR)"
@@ -348,21 +400,38 @@ def guide_chat():
             return "Mid"
         return "High"
 
+    def _format_bullets(items):
+        return "\n- " + "\n- ".join(items) if items else "\n- N/A"
+
     def _structured_response(dest, days, budget, modes, lang):
         d = (dest or "").strip() or "your destination"
         dy = days or 3
         bd = budget or 0
-        itin = fallback_itinerary(d, dy, bd, lang)
+        info = _city_info(dest)
+        if info:
+            base_itin = info["itinerary"]
+            itin = []
+            for i in range(dy):
+                src = base_itin[i % len(base_itin)]
+                itin.append({
+                    "day": i + 1,
+                    "morning": src["morning"],
+                    "afternoon": src["afternoon"],
+                    "evening": src["evening"],
+                    "tips": "",
+                })
+        else:
+            itin = fallback_itinerary(d, dy, bd, lang)
         band = _budget_band(bd)
         lines = []
         lines.append("Overview")
         lines.append(f"{d.title()} trip tailored to your preferences. Focus: " + (", ".join(sorted(modes)) if modes else "general travel").title())
         lines.append("")
         lines.append("Why Visit")
-        lines.append(_why_visit(dest))
+        lines.append(info["why"] if info else _why_visit(dest))
         lines.append("")
         lines.append("Best Time to Visit")
-        lines.append(_best_time_for_city(dest))
+        lines.append(info["best_time"] if info else _best_time_for_city(dest))
         lines.append("")
         lines.append("Budget Estimate")
         if bd and bd > 0:
@@ -370,6 +439,10 @@ def guide_chat():
         else:
             lines.append(f"Range: Low/Mid/High — {band}. Provide a budget for tailored splits.")
         lines.append("")
+        if info and info.get("attractions"):
+            lines.append("Top Attractions")
+            lines.append(_format_bullets(info["attractions"]))
+            lines.append("")
         lines.append("3–5 Day Itinerary")
         for dday in itin:
             lines.append(f"Day {dday['day']}")
@@ -398,6 +471,31 @@ def guide_chat():
         lines.append("Private guide, express entry tickets, curated food tour, or sunset cruise (availability varies).")
         return "\n".join(lines)
 
+    def _food_response(dest, budget, modes):
+        info = _city_info(dest)
+        lines = []
+        lines.append("Overview")
+        lines.append(f"Food trail in {dest.title() if dest else 'the city'}.")
+        lines.append("")
+        lines.append("Why Visit")
+        lines.append(info["why"] if info else _why_visit(dest))
+        lines.append("")
+        lines.append("Best Time to Visit")
+        lines.append(info["best_time"] if info else _best_time_for_city(dest))
+        lines.append("")
+        lines.append("Budget Estimate")
+        lines.append(_budget_band(budget))
+        lines.append("")
+        lines.append("Food Spots")
+        lines.append(_format_bullets(info["food_spots"] if info else ["Street food zone", "Popular local eateries", "Regional specialties"]))
+        lines.append("")
+        lines.append("Travel Tips")
+        lines.append("• Prefer hygienic vendors, carry cash, and check timings.")
+        lines.append("")
+        lines.append("Optional Upgrades")
+        lines.append("Guided food tour or chef-led tasting.")
+        return "\n".join(lines)
+
     dest, d_days, d_budget, d_modes = _extract_params(message, destination)
     want_itin = any(k in message.lower() for k in ["itinerary", "day plan", "plan"])
     want_food = "food" in message.lower()
@@ -406,8 +504,12 @@ def guide_chat():
     if want_itin or d_days or d_budget:
         return jsonify({"reply": _structured_response(dest, d_days, d_budget, d_modes, language)})
     if want_food and dest:
-        reply = _structured_response(dest, None, d_budget, d_modes.union({"cultural"}), language)
-        return jsonify({"reply": reply})
+        return jsonify({"reply": _food_response(dest, d_budget, d_modes)})
+    if want_attr and dest:
+        info = _city_info(dest)
+        if info and info.get("attractions"):
+            text = "Top Attractions\n" + ("\n- " + "\n- ".join(info["attractions"]))
+            return jsonify({"reply": text})
     return jsonify({"reply": _structured_response(dest, None, d_budget, d_modes, language)})
 
 @ai_features.route("/ai/sentiment", methods=["POST"])
