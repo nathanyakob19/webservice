@@ -286,7 +286,7 @@ def guide_chat():
         f"Destination: {destination or 'Not specified'}\n"
         f"User message: {message}\n"
     )
-    content, _err = call_llm(system_prompt, user_prompt)
+    content, llm_err = call_llm(system_prompt, user_prompt)
     if content:
         return jsonify({"reply": content.strip()})
 
@@ -497,20 +497,53 @@ def guide_chat():
         return "\n".join(lines)
 
     dest, d_days, d_budget, d_modes = _extract_params(message, destination)
-    want_itin = any(k in message.lower() for k in ["itinerary", "day plan", "plan"])
-    want_food = "food" in message.lower()
-    want_attr = "attraction" in message.lower()
+    msg_lower = message.lower().strip()
+    msg_tokens = re.findall(r"[a-zA-Z]+", msg_lower)
+
+    want_itin = any(k in msg_lower for k in ["itinerary", "day plan", "plan"])
+    want_food = "food" in msg_lower
+    want_attr = "attraction" in msg_lower
+
+    # If LLM is unavailable, avoid dumping full itinerary format for greetings.
+    greeting_words = {"hi", "hii", "hello", "hey", "how", "yo", "sup"}
+    intent_keywords = {
+        "itinerary", "plan", "day", "budget", "food", "attraction",
+        "best time", "things to do", "hotel", "stay", "transport",
+        "visa", "safety", "cost",
+    }
+    has_specific_intent = any(k in msg_lower for k in intent_keywords)
+
+    if (msg_lower in greeting_words or len(msg_tokens) <= 2) and not has_specific_intent:
+        if dest:
+            return jsonify({
+                "reply": f"Hi! I can help with {dest.title()}. Tell me what you want: itinerary, food spots, attractions, budget, or best time to visit.",
+                "source": "fallback",
+                "llm_error": llm_err,
+            })
+        return jsonify({
+            "reply": "Hi! I can help plan your trip. Share destination, number of days, and budget to get a tailored plan.",
+            "source": "fallback",
+            "llm_error": llm_err,
+        })
 
     if want_itin or d_days or d_budget:
-        return jsonify({"reply": _structured_response(dest, d_days, d_budget, d_modes, language)})
+        return jsonify({"reply": _structured_response(dest, d_days, d_budget, d_modes, language), "source": "fallback", "llm_error": llm_err})
     if want_food and dest:
-        return jsonify({"reply": _food_response(dest, d_budget, d_modes)})
+        return jsonify({"reply": _food_response(dest, d_budget, d_modes), "source": "fallback", "llm_error": llm_err})
     if want_attr and dest:
         info = _city_info(dest)
         if info and info.get("attractions"):
             text = "Top Attractions\n" + ("\n- " + "\n- ".join(info["attractions"]))
-            return jsonify({"reply": text})
-    return jsonify({"reply": _structured_response(dest, None, d_budget, d_modes, language)})
+            return jsonify({"reply": text, "source": "fallback", "llm_error": llm_err})
+
+    if not dest and not has_specific_intent:
+        return jsonify({
+            "reply": "Please share a destination first. Then I can give itinerary, food spots, attractions, and budget tips.",
+            "source": "fallback",
+            "llm_error": llm_err,
+        })
+
+    return jsonify({"reply": _structured_response(dest, None, d_budget, d_modes, language), "source": "fallback", "llm_error": llm_err})
 
 @ai_features.route("/ai/sentiment", methods=["POST"])
 def sentiment():
