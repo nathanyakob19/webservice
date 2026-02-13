@@ -316,7 +316,7 @@ def guide_chat():
         "5) 3-5 Day Itinerary (if applicable)\n"
         "6) Travel Tips\n"
         "7) Optional Upgrades\n\n"
-        "Respond in the requested language code, be concise but complete, and tailor answers to any destination provided."
+        "Respond in the requested language code. Answer only what the user asked. Do not add extra sections, itinerary blocks, or optional tips unless explicitly requested."
     )
     user_prompt = (
         f"Language: {language}\n"
@@ -629,16 +629,16 @@ def guide_chat():
             if dest_name:
                 return (
                     f"Hi! I can help with {dest_name.title()}. "
-                    "Ask me about itinerary, nearby places, distance/time, food spots, or budget."
+                    "Ask your exact travel question."
                 )
             return (
                 "Hi! I am your travel assistant. "
-                "Share destination, days, and budget, and I will plan it properly."
+                "Share destination and your exact question."
             )
 
         if not dest_name and (wants_itin or wants_food or wants_attr or wants_distance or wants_count):
             if user_lat is None or user_lng is None:
-                return "Please share destination or allow location access so I can calculate nearby places, distance/time, and a proper plan."
+                return "Please share destination or allow location access."
 
         if (wants_distance or wants_count):
             stats = _get_place_stats(dest_name, user_lat, user_lng)
@@ -659,7 +659,7 @@ def guide_chat():
                 parts.append(f"Average distance is about {stats['avg_km']} km.")
             if stats.get("est_hours") is not None:
                 parts.append(f"A practical visit loop is roughly {stats['est_hours']} hours.")
-            parts.append("If you want, I can now create a day-wise route with best ordering.")
+            parts.append("Ask if you want an itinerary.")
             return " ".join(parts)
 
         if wants_food and dest_name:
@@ -669,7 +669,7 @@ def guide_chat():
             if stats:
                 return (
                     f"From your current location, I can see around {stats['count']} nearby places. "
-                    "Tell me a destination name for detailed food spots, or ask me to plan a short nearby outing."
+                    "Tell me destination for detailed food spots."
                 )
 
         if wants_attr:
@@ -682,11 +682,11 @@ def guide_chat():
                 if dest_name:
                     return (
                         f"I found around {stats['count']} places in {dest_name.title()}. "
-                        "Ask me for a day-wise itinerary to organize them properly."
+                        "Ask for an itinerary if needed."
                     )
                 return (
                     f"I found around {stats['count']} nearby places from your current location. "
-                    "Ask me for a day-wise itinerary to organize them properly."
+                    "Ask for an itinerary if needed."
                 )
 
         if wants_itin or days_val or budget_val:
@@ -695,15 +695,14 @@ def guide_chat():
         if dest_name:
             return (
                 f"I can plan {dest_name.title()} for you. "
-                "Tell me days + budget, or ask: nearby places, distance/time, attractions, or food spots."
+                "Ask your exact travel question."
             )
 
         if user_lat is not None and user_lng is not None:
             return (
-                "I can use your current location. Ask me: nearby places, how far, how long, "
-                "or create a day-wise travel plan."
+                "I can use your current location. Ask your exact travel question."
             )
-        return "Tell me your destination and I will act like a proper travel chatbot with route length, nearby places, and planning."
+        return "Tell me destination and your exact travel question."
 
     dest, d_days, d_budget, d_modes = _extract_params(message, destination)
     fallback_reply = _chatty_fallback(message, dest, d_days, d_budget)
@@ -800,6 +799,51 @@ def generate_day_tips(itinerary, destination, budget, travel_type, interests, cu
         "Start early, carry water, and keep some buffer time between places."
         for _ in itinerary
     ]
+
+
+def refine_itinerary_schedule(itinerary, destination, travel_type, interests):
+    """Try LLM to refine morning/afternoon/evening slots with natural trip flow."""
+    system_prompt = "You are an expert travel planner. Keep outputs concise and practical."
+    days_payload = [
+        {
+            "day": d.get("day"),
+            "morning": d.get("morning"),
+            "afternoon": d.get("afternoon"),
+            "evening": d.get("evening"),
+            "stops": [s.get("name") for s in (d.get("stops") or []) if s.get("name")],
+        }
+        for d in itinerary
+    ]
+    user_prompt = (
+        "Refine this day-wise itinerary. Ensure each day has non-empty morning, afternoon, and evening.\n"
+        "Keep activities realistic and location-aware, do not add unrelated cities.\n"
+        "Return JSON only: {\"days\": [{\"day\":1,\"morning\":\"...\",\"afternoon\":\"...\",\"evening\":\"...\"}, ...]}\n"
+        f"Destination: {destination}\n"
+        f"Travel type: {travel_type}\n"
+        f"Interests: {', '.join(interests) if interests else 'general'}\n"
+        f"Input days: {json.dumps(days_payload)}"
+    )
+
+    content, _err = call_llm(system_prompt, user_prompt)
+    if not content:
+        return None
+
+    try:
+        parsed = json.loads(content)
+        days = parsed.get("days", [])
+        if not isinstance(days, list) or len(days) < len(itinerary):
+            return None
+        out = []
+        for i in range(len(itinerary)):
+            d = days[i] if i < len(days) else {}
+            out.append({
+                "morning": (d.get("morning") or "").strip(),
+                "afternoon": (d.get("afternoon") or "").strip(),
+                "evening": (d.get("evening") or "").strip(),
+            })
+        return out
+    except Exception:
+        return None
 
 # ---------------- NEW: PLACE SELECTION LOGIC ----------------
 def get_places(data):
@@ -966,12 +1010,16 @@ def trip_planner():
                         "distance_km": round(p.get("distance", 0), 2) if p.get("distance") is not None else None
                     })
     
+                morning_slot = fmt_place(day_places[0]) if len(day_places) > 0 else f"City highlights in {destination}"
+                afternoon_slot = fmt_place(day_places[1]) if len(day_places) > 1 else f"Local food trail and museums in {destination}"
+                evening_slot = fmt_place(day_places[2]) if len(day_places) > 2 else f"Sunset walk and market visit in {destination}"
+
                 itinerary.append({
                     "day": d,
                     "title": f"{DAY_LABELS[lang]} {d}: Explore {destination}",
-                    "morning": fmt_place(day_places[0]) if len(day_places) > 0 else "",
-                    "afternoon": fmt_place(day_places[1]) if len(day_places) > 1 else "",
-                    "evening": fmt_place(day_places[2]) if len(day_places) > 2 else "",
+                    "morning": morning_slot,
+                    "afternoon": afternoon_slot,
+                    "evening": evening_slot,
                     "tips": "",
                     "est_cost": day_cost_converted,
                     "currency": currency,
@@ -980,6 +1028,22 @@ def trip_planner():
                     "stops": stops
                 })
     
+            refined_slots = refine_itinerary_schedule(
+                itinerary,
+                destination,
+                travel_type,
+                interests,
+            )
+            if refined_slots:
+                for i, slots in enumerate(refined_slots):
+                    if i < len(itinerary):
+                        if slots.get("morning"):
+                            itinerary[i]["morning"] = slots["morning"]
+                        if slots.get("afternoon"):
+                            itinerary[i]["afternoon"] = slots["afternoon"]
+                        if slots.get("evening"):
+                            itinerary[i]["evening"] = slots["evening"]
+
             tips_list = generate_day_tips(
                 itinerary,
                 destination,
