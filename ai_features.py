@@ -579,6 +579,29 @@ def guide_chat():
 
         return stats
 
+
+    def _distance_to_place(place_name, lat, lng):
+        if not OPENTRIPMAP_API_KEY or not place_name:
+            return None
+        if lat is None or lng is None:
+            return None
+        try:
+            lat = float(lat)
+            lng = float(lng)
+        except Exception:
+            return None
+
+        try:
+            q = quote_plus(place_name.strip())
+            geo_url = f"https://api.opentripmap.com/0.1/en/places/geoname?name={q}&apikey={OPENTRIPMAP_API_KEY}"
+            geo = fetch_json(geo_url)
+            if not geo or "lat" not in geo or "lon" not in geo:
+                return None
+            d = haversine(lat, lng, float(geo["lat"]), float(geo["lon"]))
+            return round(d, 1)
+        except Exception:
+            return None
+
     def _chatty_fallback(msg, dest_name, days_val, budget_val):
         msg_l = msg.lower().strip()
         tokens = re.findall(r"[a-zA-Z]+", msg_l)
@@ -591,6 +614,16 @@ def guide_chat():
         wants_attr = any(k in msg_l for k in ["attraction", "places to visit", "things to do", "sightseeing"])
         wants_distance = any(k in msg_l for k in ["distance", "how far", "near", "nearby", "long", "travel time", "how much time", "km", "hours", "minutes"])
         wants_count = any(k in msg_l for k in ["how many", "count", "number of places", "how much place"])
+
+        place_match = re.search(r"(?:how\s+far\s+is|distance\s+to|how\s+far\s+to)\s+([a-zA-Z0-9 ,\-']+)", msg_l)
+        if place_match:
+            place_name = place_match.group(1).strip(" .?!")
+            if user_lat is None or user_lng is None:
+                return "Please allow location access so I can calculate distance from your current location."
+            d = _distance_to_place(place_name, user_lat, user_lng)
+            if d is not None:
+                return f"{place_name.title()} is about {d} km from your current location."
+            return f"I could not locate {place_name.title()} right now. Try adding city name, like 'Marine Drive Mumbai'."
 
         if is_greeting and not (wants_itin or wants_food or wants_attr or wants_distance or wants_count):
             if dest_name:
