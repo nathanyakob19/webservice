@@ -34,7 +34,7 @@ def read_env_value(key, default=""):
 ai_features = Blueprint("ai_features", __name__)
 
 SUPPORTED_LANGS = {"en": "English", "hi": "Hindi", "mr": "Marathi"}
-DAY_LABELS = {"en": "Day", "hi": "दिन", "mr": "दिवस"}
+DAY_LABELS = {"en": "Day", "hi": "à¤¦à¤¿à¤¨", "mr": "à¤¦à¤¿à¤µà¤¸"}
 CURRENCY_SYMBOLS = {
     "USD": "$",
     "INR": "Rs ",
@@ -263,20 +263,20 @@ def guide_chat():
         "2) When suggesting destinations, include: Why it is famous; Best time to visit; Approximate budget range (low/mid/high); Safety overview; Accessibility (if relevant).\n"
         "3) If user asks for itinerary: Structure response as Day 1, Day 2, Day 3 (and so on) with activities, travel time, and tips.\n"
         "4) If user mentions budget, optimize accordingly.\n"
-        "5) If user mentions family, couple, solo, student, luxury, or adventure — personalize suggestions.\n"
+        "5) If user mentions family, couple, solo, student, luxury, or adventure â€” personalize suggestions.\n"
         "6) Mention visa considerations only if relevant.\n"
         "7) Highlight sustainable and eco-friendly options where possible.\n"
         "8) If data is approximate, state it clearly.\n"
         "9) Keep responses clear, structured, and useful.\n"
         "10) If details are missing (budget, duration, country), ask one clarifying question only.\n\n"
         "SPECIAL MODES:\n"
-        "If user says: Luxury → focus on premium hotels, fine dining, private transport. Budget → hostels, public transport, free attractions. Adventure → trekking, water sports, wildlife. Cultural → museums, heritage sites, local traditions. Accessible travel → wheelchair-friendly info. Hidden gems → less crowded alternatives.\n\n"
+        "If user says: Luxury â†’ focus on premium hotels, fine dining, private transport. Budget â†’ hostels, public transport, free attractions. Adventure â†’ trekking, water sports, wildlife. Cultural â†’ museums, heritage sites, local traditions. Accessible travel â†’ wheelchair-friendly info. Hidden gems â†’ less crowded alternatives.\n\n"
         "OUTPUT STRUCTURE:\n"
         "1) Overview\n"
         "2) Why Visit\n"
         "3) Best Time to Visit\n"
         "4) Budget Estimate\n"
-        "5) 3–5 Day Itinerary (if applicable)\n"
+        "5) 3â€“5 Day Itinerary (if applicable)\n"
         "6) Travel Tips\n"
         "7) Optional Upgrades\n\n"
         "Respond in the requested language code, be concise but complete, and tailor answers to any destination provided."
@@ -319,11 +319,11 @@ def guide_chat():
     def _best_time_for_city(name):
         n = (name or "").lower()
         if "mumbai" in n:
-            return "Nov–Feb (cooler, drier); Jun–Sep monsoon with heavy rain"
+            return "Novâ€“Feb (cooler, drier); Junâ€“Sep monsoon with heavy rain"
         if "goa" in n:
-            return "Nov–Feb for beaches; Jun–Sep monsoon for lush landscapes"
+            return "Novâ€“Feb for beaches; Junâ€“Sep monsoon for lush landscapes"
         if "delhi" in n:
-            return "Oct–Mar (pleasant); Apr–Jun very hot"
+            return "Octâ€“Mar (pleasant); Aprâ€“Jun very hot"
         return "Depends on region; generally spring and autumn are comfortable"
 
     def _why_visit(name):
@@ -343,7 +343,7 @@ def guide_chat():
         n = (name or "").lower().strip()
         if "mumbai" in n:
             return {
-                "best_time": "Nov–Feb; expect heavy monsoon Jun–Sep",
+                "best_time": "Novâ€“Feb; expect heavy monsoon Junâ€“Sep",
                 "why": "Marine Drive promenade, Gateway of India, heritage architecture, film culture, and iconic street food.",
                 "attractions": [
                     "Marine Drive",
@@ -393,7 +393,7 @@ def guide_chat():
 
     def _budget_band(b):
         if b is None or b <= 0:
-            return "Low: < 5,000; Mid: 5,000–15,000; High: > 15,000 (approx, INR)"
+            return "Low: < 5,000; Mid: 5,000â€“15,000; High: > 15,000 (approx, INR)"
         if b < 5000:
             return "Low"
         if b <= 15000:
@@ -437,13 +437,13 @@ def guide_chat():
         if bd and bd > 0:
             lines.append(f"Approx total: {int(bd)} INR ({band}). Breakdown may include stay, food, transport, tickets, misc.")
         else:
-            lines.append(f"Range: Low/Mid/High — {band}. Provide a budget for tailored splits.")
+            lines.append(f"Range: Low/Mid/High â€” {band}. Provide a budget for tailored splits.")
         lines.append("")
         if info and info.get("attractions"):
             lines.append("Top Attractions")
             lines.append(_format_bullets(info["attractions"]))
             lines.append("")
-        lines.append("3–5 Day Itinerary")
+        lines.append("3â€“5 Day Itinerary")
         for dday in itin:
             lines.append(f"Day {dday['day']}")
             lines.append(f"Morning: {dday['morning'] or 'Explore a landmark'}")
@@ -465,7 +465,7 @@ def guide_chat():
             tips.append("Prefer wheelchair-friendly venues; confirm ramps and elevators.")
         if not tips:
             tips.append("Buy tickets online, start early, and check local advisories.")
-        lines.append("• " + " • ".join(tips))
+        lines.append("â€¢ " + " â€¢ ".join(tips))
         lines.append("")
         lines.append("Optional Upgrades")
         lines.append("Private guide, express entry tickets, curated food tour, or sunset cruise (availability varies).")
@@ -490,7 +490,7 @@ def guide_chat():
         lines.append(_format_bullets(info["food_spots"] if info else ["Street food zone", "Popular local eateries", "Regional specialties"]))
         lines.append("")
         lines.append("Travel Tips")
-        lines.append("• Prefer hygienic vendors, carry cash, and check timings.")
+        lines.append("â€¢ Prefer hygienic vendors, carry cash, and check timings.")
         lines.append("")
         lines.append("Optional Upgrades")
         lines.append("Guided food tour or chef-led tasting.")
@@ -522,10 +522,20 @@ def sentiment():
 
 # ---------------- FREE AI (UNCHANGED) ----------------
 def call_llm(system_prompt, user_prompt):
-    api_key = os.environ.get("LLM_API_KEY")
-    api_base = os.environ.get("LLM_API_BASE")
+    api_key = (
+        read_env_value("NVIDIA_API_KEY", "").strip()
+        or read_env_value("LLM_API_KEY", "").strip()
+    )
+    api_base = (
+        read_env_value("NVIDIA_API_BASE", "").strip()
+        or "https://integrate.api.nvidia.com/v1/chat/completions"
+    )
+    model = (
+        read_env_value("NVIDIA_MODEL", "").strip()
+        or "meta/llama-4-maverick-17b-128e-instruct"
+    )
 
-    if not api_key or not api_base:
+    if not api_key:
         return None, "ENV missing"
 
     headers = {
@@ -534,15 +544,27 @@ def call_llm(system_prompt, user_prompt):
     }
 
     payload = {
-        "inputs": f"{system_prompt}\n\n{user_prompt}",
-        "parameters": {"max_new_tokens": 400}
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        "temperature": 0.4,
+        "max_tokens": 400,
     }
 
     try:
         req = Request(api_base, data=json.dumps(payload).encode(), headers=headers)
         with urlopen(req, timeout=30) as r:
             data = json.loads(r.read().decode())
-            return data[0]["generated_text"], None
+            content = (
+                data.get("choices", [{}])[0]
+                .get("message", {})
+                .get("content", "")
+            )
+            if content:
+                return content, None
+            return None, "Empty LLM response"
     except Exception as e:
         return None, str(e)
 
@@ -699,7 +721,7 @@ def trip_planner():
         except Exception:
             return jsonify({"error": "Invalid lat/lng. Must be numbers."}), 400
     
-        # 🔥 NEW LOGIC
+        # ðŸ”¥ NEW LOGIC
         places = get_places(data)
     
         if places:
@@ -802,7 +824,7 @@ def trip_planner():
                 "cost_breakdown": split_budget(convert_amount(budget, "INR", currency), currency)
             })
     
-        # 🔁 EXISTING AI FALLBACK
+        # ðŸ” EXISTING AI FALLBACK
         system_prompt = "You are a travel planner."
         user_prompt = f"Plan a {days}-day trip to {destination} with budget {budget}."
     
@@ -819,3 +841,4 @@ def trip_planner():
         print("ERROR: /ai/trip-planner exception")
         print(traceback.format_exc())
         return jsonify({"error": "Internal server error", "details": str(e)}), 500
+
