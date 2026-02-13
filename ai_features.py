@@ -192,6 +192,35 @@ def fetch_otm_places(destination, limit=12, radius=8000):
     return places
 
 
+def fetch_otm_places_by_coords(lat, lon, limit=12, radius=8000):
+    if not OPENTRIPMAP_API_KEY:
+        return []
+    if lat is None or lon is None:
+        return []
+    try:
+        lat = float(lat)
+        lon = float(lon)
+    except Exception:
+        return []
+
+    radius_url = (
+        "https://api.opentripmap.com/0.1/en/places/radius"
+        f"?radius={radius}&lon={lon}&lat={lat}&format=json&limit={limit}&apikey={OPENTRIPMAP_API_KEY}"
+    )
+    items = fetch_json(radius_url) or []
+    places = []
+    for it in items:
+        if "name" not in it or not it.get("name"):
+            continue
+        places.append({
+            "placeName": it.get("name"),
+            "location": {"lat": it.get("lat"), "lng": it.get("lon")},
+            "source": "opentripmap",
+            "xid": it.get("xid"),
+        })
+    return places
+
+
 def path_distance_km(start_lat, start_lng, places):
     total = 0.0
     prev_lat, prev_lng = start_lat, start_lng
@@ -252,6 +281,14 @@ def guide_chat():
     message = (data.get("message") or "").strip()
     destination = (data.get("destination") or "").strip()
     language = normalize_lang(data.get("language") or "en")
+    user_lat = data.get("lat")
+    user_lng = data.get("lng")
+    try:
+        user_lat = float(user_lat) if user_lat is not None else None
+        user_lng = float(user_lng) if user_lng is not None else None
+    except Exception:
+        user_lat = None
+        user_lng = None
     if not message:
         return jsonify({"error": "Message is required"}), 400
 
@@ -496,54 +533,148 @@ def guide_chat():
         lines.append("Guided food tour or chef-led tasting.")
         return "\n".join(lines)
 
+    def _get_place_stats(dest_name, lat=None, lng=None):
+        if dest_name:
+            places = fetch_otm_places(dest_name, limit=15)
+        else:
+            places = fetch_otm_places_by_coords(lat, lng, limit=15)
+        valid = []
+        for p in places:
+            loc = p.get("location") or {}
+            if "lat" in loc and "lng" in loc:
+                try:
+                    valid.append({
+                        "name": p.get("placeName") or "Place",
+                        "lat": float(loc["lat"]),
+                        "lng": float(loc["lng"]),
+                    })
+                except Exception:
+                    continue
+
+        if not valid:
+            return None
+
+        stats = {
+            "count": len(valid),
+            "nearest_km": None,
+            "avg_km": None,
+            "est_hours": None,
+        }
+
+        if lat is not None and lng is not None:
+            dists = [haversine(lat, lng, p["lat"], p["lng"]) for p in valid]
+            if dists:
+                stats["nearest_km"] = round(min(dists), 1)
+                stats["avg_km"] = round(sum(dists) / len(dists), 1)
+                # Rough local travel estimate (walking + local transport mix)
+                stats["est_hours"] = round((sum(dists) * 0.08) + (len(valid) * 0.5), 1)
+        else:
+            c_lat = sum(p["lat"] for p in valid) / len(valid)
+            c_lng = sum(p["lng"] for p in valid) / len(valid)
+            spread = [haversine(c_lat, c_lng, p["lat"], p["lng"]) for p in valid]
+            if spread:
+                avg_spread = sum(spread) / len(spread)
+                stats["avg_km"] = round(avg_spread, 1)
+                stats["est_hours"] = round((len(valid) * 0.45) + max(0.5, avg_spread * 0.35), 1)
+
+        return stats
+
+    def _chatty_fallback(msg, dest_name, days_val, budget_val):
+        msg_l = msg.lower().strip()
+        tokens = re.findall(r"[a-zA-Z]+", msg_l)
+
+        greeting_words = {"hi", "hii", "hello", "hey", "how", "yo", "sup"}
+        is_greeting = msg_l in greeting_words or (len(tokens) <= 2 and all(tok in greeting_words for tok in tokens))
+
+        wants_itin = any(k in msg_l for k in ["itinerary", "day plan", "plan", "schedule"])
+        wants_food = any(k in msg_l for k in ["food", "eat", "restaurant", "cafe"])
+        wants_attr = any(k in msg_l for k in ["attraction", "places to visit", "things to do", "sightseeing"])
+        wants_distance = any(k in msg_l for k in ["distance", "how far", "near", "nearby", "long", "travel time", "how much time", "km", "hours", "minutes"])
+        wants_count = any(k in msg_l for k in ["how many", "count", "number of places", "how much place"])
+
+        if is_greeting and not (wants_itin or wants_food or wants_attr or wants_distance or wants_count):
+            if dest_name:
+                return (
+                    f"Hi! I can help with {dest_name.title()}. "
+                    "Ask me about itinerary, nearby places, distance/time, food spots, or budget."
+                )
+            return (
+                "Hi! I am your travel assistant. "
+                "Share destination, days, and budget, and I will plan it properly."
+            )
+
+        if not dest_name and (wants_itin or wants_food or wants_attr or wants_distance or wants_count):
+            if user_lat is None or user_lng is None:
+                return "Please share destination or allow location access so I can calculate nearby places, distance/time, and a proper plan."
+
+        if (wants_distance or wants_count):
+            stats = _get_place_stats(dest_name, user_lat, user_lng)
+            if not stats:
+                place_label = dest_name.title() if dest_name else "your current location"
+                return (
+                    f"I could not fetch reliable place stats for {place_label} right now. "
+                    "Try again in a moment, or ask for a day-wise itinerary."
+                )
+
+            if dest_name:
+                parts = [f"For {dest_name.title()}, I found around {stats['count']} notable places."]
+            else:
+                parts = [f"From your current location, I found around {stats['count']} nearby places."]
+            if stats.get("nearest_km") is not None:
+                parts.append(f"Nearest is about {stats['nearest_km']} km from your location.")
+            if stats.get("avg_km") is not None:
+                parts.append(f"Average distance is about {stats['avg_km']} km.")
+            if stats.get("est_hours") is not None:
+                parts.append(f"A practical visit loop is roughly {stats['est_hours']} hours.")
+            parts.append("If you want, I can now create a day-wise route with best ordering.")
+            return " ".join(parts)
+
+        if wants_food and dest_name:
+            return _food_response(dest_name, budget_val, set())
+        if wants_food and not dest_name and user_lat is not None and user_lng is not None:
+            stats = _get_place_stats(None, user_lat, user_lng)
+            if stats:
+                return (
+                    f"From your current location, I can see around {stats['count']} nearby places. "
+                    "Tell me a destination name for detailed food spots, or ask me to plan a short nearby outing."
+                )
+
+        if wants_attr:
+            if dest_name:
+                info = _city_info(dest_name)
+                if info and info.get("attractions"):
+                    return "Top Attractions\n" + ("\n- " + "\n- ".join(info["attractions"]))
+            stats = _get_place_stats(dest_name, user_lat, user_lng)
+            if stats:
+                if dest_name:
+                    return (
+                        f"I found around {stats['count']} places in {dest_name.title()}. "
+                        "Ask me for a day-wise itinerary to organize them properly."
+                    )
+                return (
+                    f"I found around {stats['count']} nearby places from your current location. "
+                    "Ask me for a day-wise itinerary to organize them properly."
+                )
+
+        if wants_itin or days_val or budget_val:
+            return _structured_response(dest_name, days_val, budget_val, set(), language)
+
+        if dest_name:
+            return (
+                f"I can plan {dest_name.title()} for you. "
+                "Tell me days + budget, or ask: nearby places, distance/time, attractions, or food spots."
+            )
+
+        if user_lat is not None and user_lng is not None:
+            return (
+                "I can use your current location. Ask me: nearby places, how far, how long, "
+                "or create a day-wise travel plan."
+            )
+        return "Tell me your destination and I will act like a proper travel chatbot with route length, nearby places, and planning."
+
     dest, d_days, d_budget, d_modes = _extract_params(message, destination)
-    msg_lower = message.lower().strip()
-    msg_tokens = re.findall(r"[a-zA-Z]+", msg_lower)
-
-    want_itin = any(k in msg_lower for k in ["itinerary", "day plan", "plan"])
-    want_food = "food" in msg_lower
-    want_attr = "attraction" in msg_lower
-
-    # If LLM is unavailable, avoid dumping full itinerary format for greetings.
-    greeting_words = {"hi", "hii", "hello", "hey", "how", "yo", "sup"}
-    intent_keywords = {
-        "itinerary", "plan", "day", "budget", "food", "attraction",
-        "best time", "things to do", "hotel", "stay", "transport",
-        "visa", "safety", "cost",
-    }
-    has_specific_intent = any(k in msg_lower for k in intent_keywords)
-
-    if (msg_lower in greeting_words or len(msg_tokens) <= 2) and not has_specific_intent:
-        if dest:
-            return jsonify({
-                "reply": f"Hi! I can help with {dest.title()}. Tell me what you want: itinerary, food spots, attractions, budget, or best time to visit.",
-                "source": "fallback",
-                "llm_error": llm_err,
-            })
-        return jsonify({
-            "reply": "Hi! I can help plan your trip. Share destination, number of days, and budget to get a tailored plan.",
-            "source": "fallback",
-            "llm_error": llm_err,
-        })
-
-    if want_itin or d_days or d_budget:
-        return jsonify({"reply": _structured_response(dest, d_days, d_budget, d_modes, language), "source": "fallback", "llm_error": llm_err})
-    if want_food and dest:
-        return jsonify({"reply": _food_response(dest, d_budget, d_modes), "source": "fallback", "llm_error": llm_err})
-    if want_attr and dest:
-        info = _city_info(dest)
-        if info and info.get("attractions"):
-            text = "Top Attractions\n" + ("\n- " + "\n- ".join(info["attractions"]))
-            return jsonify({"reply": text, "source": "fallback", "llm_error": llm_err})
-
-    if not dest and not has_specific_intent:
-        return jsonify({
-            "reply": "Please share a destination first. Then I can give itinerary, food spots, attractions, and budget tips.",
-            "source": "fallback",
-            "llm_error": llm_err,
-        })
-
-    return jsonify({"reply": _structured_response(dest, None, d_budget, d_modes, language), "source": "fallback", "llm_error": llm_err})
+    fallback_reply = _chatty_fallback(message, dest, d_days, d_budget)
+    return jsonify({"reply": fallback_reply, "source": "fallback", "llm_error": llm_err})
 
 @ai_features.route("/ai/sentiment", methods=["POST"])
 def sentiment():
