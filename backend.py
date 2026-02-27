@@ -34,7 +34,9 @@ def _build_upload_folder():
 UPLOAD_FOLDER = _build_upload_folder()
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
+app.config["MAX_CONTENT_LENGTH"] = int(float(os.environ.get("PATHEASE_MAX_UPLOAD_MB", "10")) * 1024 * 1024)
 print("Upload folder in use:", app.config["UPLOAD_FOLDER"])
+print("Max upload size (bytes):", app.config["MAX_CONTENT_LENGTH"])
 
 # Register AI blueprint (modular add-on)
 app.register_blueprint(ai_features)
@@ -95,6 +97,7 @@ users_collection = db["users"]
 places_collection = db["places"]
 tracking_requests_collection = db["tracking_requests"]
 live_locations_collection = db["live_locations"]
+ALLOWED_IMAGE_EXTENSIONS = {"jpg", "jpeg", "png", "gif", "webp"}
 
 # ---------------- HELPERS ----------------
 def calculate_distance(lat1, lon1, lat2, lon2):
@@ -133,9 +136,18 @@ def resolve_images(images):
     return [resolve_image(i) for i in images if i]
 
 
+def is_allowed_image_filename(filename):
+    if not filename or "." not in filename:
+        return False
+    ext = filename.rsplit(".", 1)[1].lower()
+    return ext in ALLOWED_IMAGE_EXTENSIONS
+
+
 def save_uploaded_file(file_obj):
     raw_name = secure_filename((file_obj.filename or "").strip())
     if not raw_name:
+        return None
+    if not is_allowed_image_filename(raw_name):
         return None
     stem, ext = os.path.splitext(raw_name)
     unique_name = f"{stem}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}_{uuid4().hex[:8]}{ext}"
@@ -280,6 +292,8 @@ def submit_place():
     filename = None
     if image:
         filename = save_uploaded_file(image)
+        if not filename:
+            return jsonify({"error": "Invalid image file. Allowed: jpg, jpeg, png, gif, webp"}), 400
 
     images_list = []
     if filename:
@@ -495,7 +509,7 @@ def upload_place_images():
             filenames.append(filename)
 
     if not filenames:
-        return jsonify({"error": "No valid files"}), 400
+        return jsonify({"error": "No valid files. Allowed: jpg, jpeg, png, gif, webp"}), 400
 
     result = places_collection.update_one(
         {"_id": oid},
@@ -627,8 +641,10 @@ def upload_profile_pic():
         return jsonify({"error": "No image"}), 400
     filename = save_uploaded_file(image)
     if not filename:
-        return jsonify({"error": "Invalid image filename"}), 400
-    users_collection.update_one({"email": email}, {"$set": {"avatar": filename}})
+        return jsonify({"error": "Invalid image file. Allowed: jpg, jpeg, png, gif, webp"}), 400
+    result = users_collection.update_one({"email": email}, {"$set": {"avatar": filename}})
+    if result.matched_count == 0:
+        return jsonify({"error": "User not found"}), 404
     return jsonify({"message": "Profile image updated", "avatar": filename})
 
 @app.route("/admin/users")
