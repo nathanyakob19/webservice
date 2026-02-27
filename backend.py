@@ -16,7 +16,35 @@ from ai_features import ai_features
 
 # ---------------- APP SETUP ----------------
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "*"}})
+
+def _cors_origins():
+    raw = (os.environ.get("PATHEASE_CORS_ORIGINS", "") or "").strip()
+    if raw:
+        return [o.strip() for o in raw.split(",") if o.strip()]
+    return [
+        "https://patheasee.netlify.app",
+        "http://localhost:3000",
+    ]
+
+
+ALLOWED_CORS_ORIGINS = _cors_origins()
+CORS(
+    app,
+    resources={r"/*": {"origins": ALLOWED_CORS_ORIGINS}},
+    methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization"],
+)
+
+
+@app.after_request
+def add_cors_headers(response):
+    origin = request.headers.get("Origin")
+    if origin and origin in ALLOWED_CORS_ORIGINS:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Vary"] = "Origin"
+        response.headers["Access-Control-Allow-Methods"] = "GET,POST,PUT,DELETE,OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type,Authorization"
+    return response
 
 # ---------------- CONFIG ----------------
 def _build_upload_folder():
