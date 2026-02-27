@@ -10,6 +10,7 @@ import jwt
 import os
 import json
 import math
+from uuid import uuid4
 from datetime import datetime, timedelta
 from ai_features import ai_features
 
@@ -18,9 +19,22 @@ app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
 # ---------------- CONFIG ----------------
-UPLOAD_FOLDER = os.path.join(app.root_path, "uploads")
+def _build_upload_folder():
+    configured = (os.environ.get("PATHEASE_UPLOAD_FOLDER", "") or "").strip()
+    if configured:
+        return configured
+
+    # On Azure App Service Linux, keep user uploads in /home to avoid code-deploy churn.
+    if os.environ.get("WEBSITE_SITE_NAME"):
+        return "/home/site/uploads"
+
+    return os.path.join(app.root_path, "uploads")
+
+
+UPLOAD_FOLDER = _build_upload_folder()
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
+print("Upload folder in use:", app.config["UPLOAD_FOLDER"])
 
 # Register AI blueprint (modular add-on)
 app.register_blueprint(ai_features)
@@ -103,14 +117,30 @@ def normalize_location(loc):
 def resolve_image(image):
     if not image:
         return None
-    if isinstance(image, str) and image.startswith("http"):
+    if not isinstance(image, str):
+        return None
+    if image.startswith("http"):
         return image
-    return f"/uploads/{image}"
+    if image.startswith("/uploads/"):
+        return image
+    if image.startswith("uploads/"):
+        return f"/{image}"
+    return f"/uploads/{image.lstrip('/')}"
 
 def resolve_images(images):
     if not images:
         return []
     return [resolve_image(i) for i in images if i]
+
+
+def save_uploaded_file(file_obj):
+    raw_name = secure_filename((file_obj.filename or "").strip())
+    if not raw_name:
+        return None
+    stem, ext = os.path.splitext(raw_name)
+    unique_name = f"{stem}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}_{uuid4().hex[:8]}{ext}"
+    file_obj.save(os.path.join(app.config["UPLOAD_FOLDER"], unique_name))
+    return unique_name
 
 def compute_feature_avg_ratings(reviews):
     if not reviews:
@@ -137,8 +167,11 @@ def compute_feature_avg_ratings(reviews):
 # ---------------- FILE SERVING ----------------
 @app.route("/uploads/<path:filename>")
 def uploaded_file(filename):
+    filename = (filename or "").lstrip("/")
     if filename.startswith("http"):
         abort(404)
+    if filename.startswith("uploads/"):
+        filename = filename.split("/", 1)[1]
     return send_from_directory(app.config["UPLOAD_FOLDER"], filename)
 
 # ---------------- AUTH ----------------
@@ -246,8 +279,7 @@ def submit_place():
     image = request.files.get("image")
     filename = None
     if image:
-        filename = secure_filename(image.filename)
-        image.save(os.path.join(app.config["UPLOAD_FOLDER"], filename))
+        filename = save_uploaded_file(image)
 
     images_list = []
     if filename:
@@ -458,15 +490,14 @@ def upload_place_images():
 
     filenames = []
     for f in files:
-        filename = secure_filename(f.filename)
+        filename = save_uploaded_file(f)
         if filename:
-            f.save(os.path.join(app.config["UPLOAD_FOLDER"], filename))
             filenames.append(filename)
 
     if not filenames:
         return jsonify({"error": "No valid files"}), 400
 
-    places_collection.update_one(
+    result = places_collection.update_one(
         {"_id": oid},
         {
             "$push": {
@@ -484,6 +515,8 @@ def upload_place_images():
             }
         }
     )
+    if result.matched_count == 0:
+        return jsonify({"error": "Place not found"}), 404
     return jsonify({"message": "Images added", "images": filenames})
 
 @app.route("/get-profile", methods=["POST"])
@@ -592,8 +625,9 @@ def upload_profile_pic():
     image = request.files.get("image")
     if not image:
         return jsonify({"error": "No image"}), 400
-    filename = secure_filename(image.filename)
-    image.save(os.path.join(app.config["UPLOAD_FOLDER"], filename))
+    filename = save_uploaded_file(image)
+    if not filename:
+        return jsonify({"error": "Invalid image filename"}), 400
     users_collection.update_one({"email": email}, {"$set": {"avatar": filename}})
     return jsonify({"message": "Profile image updated", "avatar": filename})
 
