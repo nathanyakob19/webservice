@@ -163,6 +163,23 @@ def resolve_images(images):
         return []
     return [resolve_image(i) for i in images if i]
 
+def image_to_stored_name(image):
+    if not image or not isinstance(image, str):
+        return None
+    if image.startswith("http"):
+        try:
+            path = urlsplit(image).path or ""
+            if "/uploads/" in path:
+                return path.split("/uploads/", 1)[1].lstrip("/")
+        except Exception:
+            return None
+        return None
+    if image.startswith("/uploads/"):
+        return image.split("/uploads/", 1)[1].lstrip("/")
+    if image.startswith("uploads/"):
+        return image.split("uploads/", 1)[1].lstrip("/")
+    return image.lstrip("/")
+
 
 def is_allowed_image_filename(filename):
     if not filename or "." not in filename:
@@ -531,6 +548,96 @@ def admin_rate_place():
         }}
     )
     return jsonify({"message": "Ratings saved"})
+
+@app.route("/admin/place/update", methods=["POST"])
+def admin_update_place():
+    data = request.json or {}
+    try:
+        oid = ObjectId(data.get("place_id"))
+    except InvalidId:
+        return jsonify({"error": "Invalid place id"}), 400
+
+    existing = places_collection.find_one({"_id": oid}) or {}
+
+    place_name = (data.get("placeName") or existing.get("placeName") or "").strip()
+    description = (data.get("description") or "").strip()
+    city = (data.get("city") or "").strip()
+
+    raw_loc = data.get("location") or {}
+    lat = raw_loc.get("lat")
+    lng = raw_loc.get("lng")
+    location = existing.get("location") or {}
+    try:
+        if lat not in (None, "") and lng not in (None, ""):
+            location = {"lat": float(lat), "lng": float(lng)}
+    except Exception:
+        return jsonify({"error": "Invalid location"}), 400
+
+    features = data.get("features")
+    if features is None:
+        features = existing.get("features") or {}
+    if not isinstance(features, dict):
+        return jsonify({"error": "features must be object"}), 400
+
+    primary_image = data.get("primary_image")
+    primary_stored = image_to_stored_name(primary_image) if primary_image else None
+    images = existing.get("images") or []
+    if primary_stored and primary_stored in images:
+        image_value = primary_stored
+    else:
+        image_value = existing.get("image")
+
+    places_collection.update_one(
+        {"_id": oid},
+        {"$set": {
+            "placeName": place_name,
+            "description": description,
+            "city": city,
+            "location": location,
+            "features": features,
+            "image": image_value,
+            "updatedAt": datetime.utcnow(),
+        }}
+    )
+    return jsonify({"message": "Place updated"})
+
+@app.route("/admin/place/delete", methods=["POST"])
+def admin_delete_place():
+    data = request.json or {}
+    try:
+        oid = ObjectId(data.get("place_id"))
+    except InvalidId:
+        return jsonify({"error": "Invalid place id"}), 400
+
+    result = places_collection.delete_one({"_id": oid})
+    if result.deleted_count == 0:
+        return jsonify({"error": "Place not found"}), 404
+    return jsonify({"message": "Place deleted"})
+
+@app.route("/admin/place/image/delete", methods=["POST"])
+def admin_delete_place_image():
+    data = request.json or {}
+    try:
+        oid = ObjectId(data.get("place_id"))
+    except InvalidId:
+        return jsonify({"error": "Invalid place id"}), 400
+
+    stored_name = image_to_stored_name(data.get("image"))
+    if not stored_name:
+        return jsonify({"error": "Invalid image"}), 400
+
+    place = places_collection.find_one({"_id": oid}) or {}
+    images = [img for img in (place.get("images") or []) if img != stored_name]
+    current_primary = image_to_stored_name(place.get("image"))
+    next_primary = place.get("image")
+    if current_primary == stored_name:
+        next_primary = images[0] if images else None
+
+    places_collection.update_one(
+        {"_id": oid},
+        {"$set": {"images": images, "image": next_primary, "updatedAt": datetime.utcnow()}}
+    )
+    return jsonify({"message": "Image deleted"})
 
 @app.route("/upload-place-images", methods=["POST"])
 def upload_place_images():
