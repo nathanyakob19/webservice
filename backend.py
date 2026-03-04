@@ -362,9 +362,9 @@ def get_approved():
         p["location"] = {"lat": lat, "lng": lng} if lat else None
         p["image"] = resolve_image(p.get("image"))
         p["images"] = resolve_images(p.get("images", []))
-        approved_reviews = [r for r in (p.get("reviews") or []) if r.get("approved")]
-        p["reviews"] = approved_reviews
-        p["feature_avg_ratings"] = compute_feature_avg_ratings(approved_reviews)
+        all_reviews = p.get("reviews") or []
+        p["reviews"] = all_reviews
+        p["feature_avg_ratings"] = compute_feature_avg_ratings(all_reviews)
         if p.get("submittedAt"):
             try:
                 p["submittedAt"] = p["submittedAt"].isoformat()
@@ -402,7 +402,7 @@ def add_place_review():
         "avatar": avatar,
         "comment": data.get("comment") or "",
         "ratings": data.get("ratings") or {},
-        "approved": False,
+        "approved": True,
         "createdAt": datetime.utcnow()
     }
 
@@ -504,13 +504,28 @@ def admin_rate_place():
     except InvalidId:
         return jsonify({"error": "Invalid place id"}), 400
 
-    feature_ratings = data.get("feature_ratings") or {}
+    raw_feature_ratings = data.get("feature_ratings") or {}
+    feature_ratings = {}
+    for k, v in raw_feature_ratings.items():
+        try:
+            val = float(v)
+        except Exception:
+            continue
+        if val < 0:
+            val = 0
+        if val > 5:
+            val = 5
+        feature_ratings[k] = round(val, 2)
     accessibility_level = data.get("accessibility_level") or ""
+    place = places_collection.find_one({"_id": oid}, {"features": 1}) or {}
+    merged_features = dict(place.get("features") or {})
+    merged_features.update(feature_ratings)
 
     places_collection.update_one(
         {"_id": oid},
         {"$set": {
             "feature_ratings": feature_ratings,
+            "features": merged_features,
             "accessibility_level": accessibility_level,
             "ratedAt": datetime.utcnow()
         }}
