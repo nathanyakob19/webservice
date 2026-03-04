@@ -559,46 +559,47 @@ def admin_update_place():
 
     existing = places_collection.find_one({"_id": oid}) or {}
 
-    place_name = (data.get("placeName") or existing.get("placeName") or "").strip()
-    description = (data.get("description") or "").strip()
-    city = (data.get("city") or "").strip()
+    update_fields = {"updatedAt": datetime.utcnow()}
 
-    raw_loc = data.get("location") or {}
-    lat = raw_loc.get("lat")
-    lng = raw_loc.get("lng")
-    location = existing.get("location") or {}
-    try:
-        if lat not in (None, "") and lng not in (None, ""):
-            location = {"lat": float(lat), "lng": float(lng)}
-    except Exception:
-        return jsonify({"error": "Invalid location"}), 400
+    if "placeName" in data:
+        update_fields["placeName"] = (data.get("placeName") or "").strip()
+    if "description" in data:
+        update_fields["description"] = (data.get("description") or "").strip()
+    if "city" in data:
+        update_fields["city"] = (data.get("city") or "").strip()
 
-    features = data.get("features")
-    if features is None:
-        features = existing.get("features") or {}
-    if not isinstance(features, dict):
-        return jsonify({"error": "features must be object"}), 400
+    if "location" in data:
+        raw_loc = data.get("location") or {}
+        lat = raw_loc.get("lat")
+        lng = raw_loc.get("lng")
+        location = existing.get("location") or {}
+        try:
+            if lat not in (None, "") and lng not in (None, ""):
+                location = {"lat": float(lat), "lng": float(lng)}
+            update_fields["location"] = location
+        except Exception:
+            return jsonify({"error": "Invalid location"}), 400
+
+    if "features" in data:
+        features = data.get("features")
+        if not isinstance(features, dict):
+            return jsonify({"error": "features must be object"}), 400
+        update_fields["features"] = features
 
     primary_image = data.get("primary_image")
-    primary_stored = image_to_stored_name(primary_image) if primary_image else None
-    images = existing.get("images") or []
-    if primary_stored and primary_stored in images:
-        image_value = primary_stored
-    else:
-        image_value = existing.get("image")
+    if primary_image:
+        primary_stored = image_to_stored_name(primary_image)
+        images = [img for img in (existing.get("images") or []) if img]
+        if primary_stored:
+            if primary_stored in images:
+                # Keep a true queue: primary image comes first.
+                images = [primary_stored] + [img for img in images if img != primary_stored]
+                update_fields["images"] = images
+                update_fields["image"] = primary_stored
+            else:
+                return jsonify({"error": "Primary image not found in queue"}), 400
 
-    places_collection.update_one(
-        {"_id": oid},
-        {"$set": {
-            "placeName": place_name,
-            "description": description,
-            "city": city,
-            "location": location,
-            "features": features,
-            "image": image_value,
-            "updatedAt": datetime.utcnow(),
-        }}
-    )
+    places_collection.update_one({"_id": oid}, {"$set": update_fields})
     return jsonify({"message": "Place updated"})
 
 @app.route("/admin/place/delete", methods=["POST"])
