@@ -740,6 +740,176 @@ def voice_assistant():
     if not transcript:
         return jsonify({"error": "Message is required"}), 400
 
+    def _local_voice_parse(text):
+        t = (text or "").lower().strip()
+        actions = []
+        reply = ""
+        def _val_after(regex):
+            m = re.search(regex, t, re.I)
+            return (m.group(1).strip() if m and m.group(1) else "")
+        if not t:
+            return [], ""
+        if t == "home" or "go home" in t:
+            actions.append({"type": "navigate", "path": "/"})
+            reply = "Opening home."
+            return actions, reply
+        if "open maps" in t or "maps" in t:
+            actions.append({"type": "navigate", "path": "/maps"})
+            reply = "Opening maps."
+            return actions, reply
+        if "open admin" in t:
+            actions.append({"type": "navigate", "path": "/admin"})
+            reply = "Opening admin."
+            return actions, reply
+        if "open upload" in t or "upload" in t:
+            actions.append({"type": "navigate", "path": "/upload"})
+            reply = "Opening upload."
+            return actions, reply
+        if "guardian requests" in t:
+            actions.append({"type": "navigate", "path": "/guardian-request"})
+            reply = "Opening guardian requests."
+            return actions, reply
+        if "live tracking" in t:
+            actions.append({"type": "navigate", "path": "/guardian-tracking"})
+            reply = "Opening live tracking."
+            return actions, reply
+        if "ai chat" in t:
+            actions.append({"type": "navigate", "path": "/ai-chat"})
+            reply = "Opening AI chat."
+            return actions, reply
+        if "ai itinerary" in t or "trip planner" in t:
+            actions.append({"type": "navigate", "path": "/ai-itinerary"})
+            reply = "Opening itinerary."
+            return actions, reply
+        if "ai sentiment" in t:
+            actions.append({"type": "navigate", "path": "/ai-sentiment"})
+            reply = "Opening sentiment."
+            return actions, reply
+        if "itinerary" in t:
+            actions.append({"type": "navigate", "path": "/itinerary"})
+            reply = "Opening itinerary."
+            return actions, reply
+        if "profile" in t:
+            actions.append({"type": "navigate", "path": "/profile"})
+            reply = "Opening profile."
+            return actions, reply
+        if "accessibility page" in t:
+            actions.append({"type": "navigate", "path": "/accessibility"})
+            reply = "Opening accessibility."
+            return actions, reply
+        if "accessibility" in t or "color blind" in t:
+            actions.append({"type": "toggle_accessibility"})
+            reply = "Toggling accessibility."
+            return actions, reply
+        if "speech on" in t:
+            actions.append({"type": "toggle_speech", "enabled": True})
+            reply = "Speech is on."
+            return actions, reply
+        if "speech off" in t:
+            actions.append({"type": "toggle_speech", "enabled": False})
+            reply = "Speech is off."
+            return actions, reply
+        if "open quick menu" in t:
+            actions.append({"type": "toggle_quick_menu", "open": True})
+            reply = "Opening quick menu."
+            return actions, reply
+        if "close quick menu" in t:
+            actions.append({"type": "toggle_quick_menu", "open": False})
+            reply = "Closing quick menu."
+            return actions, reply
+        if "open cart" in t:
+            actions.append({"type": "navigate", "path": "/cart"})
+            reply = "Opening cart."
+            return actions, reply
+        if "open place" in t:
+            name = _val_after(r"open place\s+(.+)")
+            if name:
+                actions.append({"type": "voice_event", "event_type": "open-place", "name": name})
+                reply = f"Opening {name}."
+            else:
+                reply = "Please say the place name."
+            return actions, reply
+        if "close place" in t:
+            actions.append({"type": "voice_event", "event_type": "close-place"})
+            reply = "Closed place panel."
+            return actions, reply
+        if "add to cart" in t:
+            name = _val_after(r"add\s+(.+?)\s+to cart") or _val_after(r"add to cart\s+(.+)")
+            payload = {"type": "voice_event", "event_type": "add-to-cart"}
+            if name:
+                payload["name"] = name
+                reply = f"Added {name} to cart."
+            else:
+                reply = "Added to cart."
+            actions.append(payload)
+            return actions, reply
+        if "remove from cart" in t:
+            name = _val_after(r"remove\s+(.+?)\s+from cart") or _val_after(r"remove from cart\s+(.+)")
+            payload = {"type": "voice_event", "event_type": "remove-from-cart"}
+            if name:
+                payload["name"] = name
+                reply = f"Removed {name} from cart."
+            else:
+                reply = "Removed from cart."
+            actions.append(payload)
+            return actions, reply
+        if "generate itinerary" in t or "create itinerary" in t:
+            actions.append({"type": "voice_event", "event_type": "generate-itinerary"})
+            reply = "Generating itinerary."
+            return actions, reply
+        if "save itinerary" in t:
+            actions.append({"type": "voice_event", "event_type": "save-itinerary"})
+            reply = "Saving itinerary."
+            return actions, reply
+        if "use current location" in t:
+            actions.append({"type": "voice_event", "event_type": "use-current-location"})
+            reply = "Using current location."
+            return actions, reply
+        if "set destination" in t:
+            value = _val_after(r"set destination(?: to)?\s+(.+)")
+            if value:
+                actions.append({"type": "voice_event", "event_type": "set-destination", "value": value})
+                reply = "Destination set."
+                return actions, reply
+        if "set budget" in t:
+            value = _val_after(r"set budget(?: to)?\s+(.+)")
+            if value:
+                actions.append({"type": "voice_event", "event_type": "set-budget", "value": value})
+                reply = "Budget set."
+                return actions, reply
+        if "set days" in t:
+            value = _val_after(r"set days(?: to)?\s+(.+)")
+            if value:
+                actions.append({"type": "voice_event", "event_type": "set-days", "value": value})
+                reply = "Days set."
+                return actions, reply
+        if "set travel type" in t:
+            value = _val_after(r"set travel type(?: to)?\s+(.+)")
+            if value:
+                actions.append({"type": "voice_event", "event_type": "set-travel-type", "value": value})
+                reply = "Travel type set."
+                return actions, reply
+        if "set interests" in t:
+            value = _val_after(r"set interests(?: to)?\s+(.+)")
+            if value:
+                actions.append({"type": "voice_event", "event_type": "set-interests", "value": value})
+                reply = "Interests set."
+                return actions, reply
+        if "set currency" in t:
+            value = _val_after(r"set currency(?: to)?\s+(.+)")
+            if value:
+                actions.append({"type": "voice_event", "event_type": "set-currency", "value": value})
+                reply = "Currency set."
+                return actions, reply
+        if "logout" in t:
+            actions.append({"type": "logout"})
+            reply = "Logging out."
+            return actions, reply
+        if t.startswith("help"):
+            reply = "Say Hey PathEase, then commands like go home, open maps, open itinerary, open place Gateway of India, add to cart, generate itinerary, save itinerary, speech on, speech off, open cart, or logout."
+            return [], reply
+        return [], ""
+
     system_prompt = (
         "You are PathEase Voice Assistant Command Router.\n"
         "Convert user speech into STRICT JSON with fields: reply, actions.\n"
@@ -787,12 +957,16 @@ def voice_assistant():
             "/",
             "/maps",
             "/admin",
+            "/admin/pending",
+            "/admin/users",
+            "/admin/analytics",
             "/upload",
             "/guardian-request",
             "/guardian-tracking",
             "/ai-chat",
             "/ai-itinerary",
             "/ai-sentiment",
+            "/search-results",
             "/itinerary",
             "/profile",
             "/accessibility",
@@ -854,12 +1028,10 @@ def voice_assistant():
         if sanitized_actions:
             return jsonify({"reply": "Done.", "actions": sanitized_actions, "source": "nvidia"})
 
-    return jsonify({
-        "reply": "Sorry, I could not process that command clearly. Please try again.",
-        "actions": [],
-        "source": "fallback",
-        "llm_error": llm_err,
-    })
+    local_actions, local_reply = _local_voice_parse(transcript)
+    if local_actions or local_reply:
+        return jsonify({"reply": (local_reply or "Done."), "actions": local_actions, "source": "local"})
+    return jsonify({"reply": "Sorry, I could not process that command clearly. Please try again.", "actions": [], "source": "fallback", "llm_error": llm_err})
 
 @ai_features.route("/ai/sentiment", methods=["POST"])
 def sentiment():
