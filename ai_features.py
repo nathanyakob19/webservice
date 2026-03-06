@@ -315,30 +315,15 @@ def guide_chat():
         return jsonify({"error": "Message is required"}), 400
 
     system_prompt = (
-        "You are an advanced Global Tourism Intelligence Assistant.\n\n"
-        "Your goal is to provide accurate, well-structured, globally relevant tourism guidance including destinations, itineraries, travel tips, culture, safety, accessibility, budget planning, transportation, and seasonal recommendations.\n\n"
-        "CORE BEHAVIOR:\n"
-        "1) Provide globally balanced tourism insights (not limited to one country unless asked).\n"
-        "2) When suggesting destinations, include: Why it is famous; Best time to visit; Approximate budget range (low/mid/high); Safety overview; Accessibility (if relevant).\n"
-        "3) If user asks for itinerary: Structure response as Day 1, Day 2, Day 3 (and so on) with activities, travel time, and tips.\n"
-        "4) If user mentions budget, optimize accordingly.\n"
-        "5) If user mentions family, couple, solo, student, luxury, or adventure - personalize suggestions.\n"
-        "6) Mention visa considerations only if relevant.\n"
-        "7) Highlight sustainable and eco-friendly options where possible.\n"
-        "8) If data is approximate, state it clearly.\n"
-        "9) Keep responses clear, structured, and useful.\n"
-        "10) If details are missing (budget, duration, country), ask one clarifying question only.\n\n"
-        "SPECIAL MODES:\n"
-        "If user says: Luxury -> focus on premium hotels, fine dining, private transport. Budget -> hostels, public transport, free attractions. Adventure -> trekking, water sports, wildlife. Cultural -> museums, heritage sites, local traditions. Accessible travel -> wheelchair-friendly info. Hidden gems -> less crowded alternatives.\n\n"
-        "OUTPUT STRUCTURE:\n"
-        "1) Overview\n"
-        "2) Why Visit\n"
-        "3) Best Time to Visit\n"
-        "4) Budget Estimate\n"
-        "5) 3-5 Day Itinerary (if applicable)\n"
-        "6) Travel Tips\n"
-        "7) Optional Upgrades\n\n"
-        "Respond in the requested language code. Answer only what the user asked. Do not add extra sections, itinerary blocks, or optional tips unless explicitly requested."
+        "You are Pathease Assistant, a friendly, accessibility-focused tourism voice assistant.\n"
+        "Behavior:\n"
+        "- Always introduce as 'Pathease Assistant' in your first sentence.\n"
+        "- Keep replies short and voice-friendly (1–3 sentences) unless the user explicitly requests a detailed itinerary.\n"
+        "- Focus on accessibility info (wheelchair access, ramps/elevators, transport options, accessible washrooms, safety and ease of navigation).\n"
+        "- If you don't know, say: \"I'm sorry, I don't have that information yet, but I can help you explore other accessible destinations.\".\n"
+        "- Friendly and supportive tone. Tourism-only; avoid unrelated content.\n"
+        "When the user asks for an itinerary, provide a concise day-wise plan (Day 1/2/3) with short lines.\n"
+        "Respond in the requested language."
     )
     user_prompt = (
         f"Language: {language}\n"
@@ -744,6 +729,7 @@ def voice_assistant():
         t = (text or "").lower().strip()
         actions = []
         reply = ""
+        pfx = "Pathease Assistant: "
         def _val_after(regex):
             m = re.search(regex, t, re.I)
             return (m.group(1).strip() if m and m.group(1) else "")
@@ -751,96 +737,96 @@ def voice_assistant():
             return [], ""
         if t == "home" or "go home" in t:
             actions.append({"type": "navigate", "path": "/"})
-            reply = "Opening home."
+            reply = pfx + "Opening home."
             return actions, reply
         if "open maps" in t or "maps" in t:
             actions.append({"type": "navigate", "path": "/maps"})
-            reply = "Opening maps."
+            reply = pfx + "Opening maps."
             return actions, reply
         if "open admin" in t:
             actions.append({"type": "navigate", "path": "/admin"})
-            reply = "Opening admin."
+            reply = pfx + "Opening admin."
             return actions, reply
         if "open upload" in t or "upload" in t:
             actions.append({"type": "navigate", "path": "/upload"})
-            reply = "Opening upload."
+            reply = pfx + "Opening upload."
             return actions, reply
         if "guardian requests" in t:
             actions.append({"type": "navigate", "path": "/guardian-request"})
-            reply = "Opening guardian requests."
+            reply = pfx + "Opening guardian requests."
             return actions, reply
         if "live tracking" in t:
             actions.append({"type": "navigate", "path": "/guardian-tracking"})
-            reply = "Opening live tracking."
+            reply = pfx + "Opening live tracking."
             return actions, reply
         if "ai chat" in t:
             actions.append({"type": "navigate", "path": "/ai-chat"})
-            reply = "Opening AI chat."
+            reply = pfx + "Opening AI chat."
             return actions, reply
         if "ai itinerary" in t or "trip planner" in t:
             actions.append({"type": "navigate", "path": "/ai-itinerary"})
-            reply = "Opening itinerary."
+            reply = pfx + "Opening itinerary."
             return actions, reply
         if "ai sentiment" in t:
             actions.append({"type": "navigate", "path": "/ai-sentiment"})
-            reply = "Opening sentiment."
+            reply = pfx + "Opening sentiment."
             return actions, reply
         if "itinerary" in t:
             actions.append({"type": "navigate", "path": "/itinerary"})
-            reply = "Opening itinerary."
+            reply = pfx + "Opening itinerary."
             return actions, reply
         if "profile" in t:
             actions.append({"type": "navigate", "path": "/profile"})
-            reply = "Opening profile."
+            reply = pfx + "Opening profile."
             return actions, reply
         if "accessibility page" in t:
             actions.append({"type": "navigate", "path": "/accessibility"})
-            reply = "Opening accessibility."
+            reply = pfx + "Opening accessibility."
             return actions, reply
         if "accessibility" in t or "color blind" in t:
             actions.append({"type": "toggle_accessibility"})
-            reply = "Toggling accessibility."
+            reply = pfx + "Toggling accessibility."
             return actions, reply
         if "speech on" in t:
             actions.append({"type": "toggle_speech", "enabled": True})
-            reply = "Speech is on."
+            reply = pfx + "Speech is on."
             return actions, reply
         if "speech off" in t:
             actions.append({"type": "toggle_speech", "enabled": False})
-            reply = "Speech is off."
+            reply = pfx + "Speech is off."
             return actions, reply
         if "open quick menu" in t:
             actions.append({"type": "toggle_quick_menu", "open": True})
-            reply = "Opening quick menu."
+            reply = pfx + "Opening quick menu."
             return actions, reply
         if "close quick menu" in t:
             actions.append({"type": "toggle_quick_menu", "open": False})
-            reply = "Closing quick menu."
+            reply = pfx + "Closing quick menu."
             return actions, reply
         if "open cart" in t:
             actions.append({"type": "navigate", "path": "/cart"})
-            reply = "Opening cart."
+            reply = pfx + "Opening cart."
             return actions, reply
         if "open place" in t:
             name = _val_after(r"open place\s+(.+)")
             if name:
                 actions.append({"type": "voice_event", "event_type": "open-place", "name": name})
-                reply = f"Opening {name}."
+                reply = pfx + f"Opening {name}."
             else:
-                reply = "Please say the place name."
+                reply = pfx + "Please say the place name."
             return actions, reply
         if "close place" in t:
             actions.append({"type": "voice_event", "event_type": "close-place"})
-            reply = "Closed place panel."
+            reply = pfx + "Closed place panel."
             return actions, reply
         if "add to cart" in t:
             name = _val_after(r"add\s+(.+?)\s+to cart") or _val_after(r"add to cart\s+(.+)")
             payload = {"type": "voice_event", "event_type": "add-to-cart"}
             if name:
                 payload["name"] = name
-                reply = f"Added {name} to cart."
+                reply = pfx + f"Added {name} to cart."
             else:
-                reply = "Added to cart."
+                reply = pfx + "Added to cart."
             actions.append(payload)
             return actions, reply
         if "remove from cart" in t:
@@ -848,70 +834,70 @@ def voice_assistant():
             payload = {"type": "voice_event", "event_type": "remove-from-cart"}
             if name:
                 payload["name"] = name
-                reply = f"Removed {name} from cart."
+                reply = pfx + f"Removed {name} from cart."
             else:
-                reply = "Removed from cart."
+                reply = pfx + "Removed from cart."
             actions.append(payload)
             return actions, reply
         if "generate itinerary" in t or "create itinerary" in t:
             actions.append({"type": "voice_event", "event_type": "generate-itinerary"})
-            reply = "Generating itinerary."
+            reply = pfx + "Generating itinerary."
             return actions, reply
         if "save itinerary" in t:
             actions.append({"type": "voice_event", "event_type": "save-itinerary"})
-            reply = "Saving itinerary."
+            reply = pfx + "Saving itinerary."
             return actions, reply
         if "use current location" in t:
             actions.append({"type": "voice_event", "event_type": "use-current-location"})
-            reply = "Using current location."
+            reply = pfx + "Using current location."
             return actions, reply
         if "set destination" in t:
             value = _val_after(r"set destination(?: to)?\s+(.+)")
             if value:
                 actions.append({"type": "voice_event", "event_type": "set-destination", "value": value})
-                reply = "Destination set."
+                reply = pfx + "Destination set."
                 return actions, reply
         if "set budget" in t:
             value = _val_after(r"set budget(?: to)?\s+(.+)")
             if value:
                 actions.append({"type": "voice_event", "event_type": "set-budget", "value": value})
-                reply = "Budget set."
+                reply = pfx + "Budget set."
                 return actions, reply
         if "set days" in t:
             value = _val_after(r"set days(?: to)?\s+(.+)")
             if value:
                 actions.append({"type": "voice_event", "event_type": "set-days", "value": value})
-                reply = "Days set."
+                reply = pfx + "Days set."
                 return actions, reply
         if "set travel type" in t:
             value = _val_after(r"set travel type(?: to)?\s+(.+)")
             if value:
                 actions.append({"type": "voice_event", "event_type": "set-travel-type", "value": value})
-                reply = "Travel type set."
+                reply = pfx + "Travel type set."
                 return actions, reply
         if "set interests" in t:
             value = _val_after(r"set interests(?: to)?\s+(.+)")
             if value:
                 actions.append({"type": "voice_event", "event_type": "set-interests", "value": value})
-                reply = "Interests set."
+                reply = pfx + "Interests set."
                 return actions, reply
         if "set currency" in t:
             value = _val_after(r"set currency(?: to)?\s+(.+)")
             if value:
                 actions.append({"type": "voice_event", "event_type": "set-currency", "value": value})
-                reply = "Currency set."
+                reply = pfx + "Currency set."
                 return actions, reply
         if "logout" in t:
             actions.append({"type": "logout"})
-            reply = "Logging out."
+            reply = pfx + "Logging out."
             return actions, reply
         if t.startswith("help"):
-            reply = "Say Hey PathEase, then commands like go home, open maps, open itinerary, open place Gateway of India, add to cart, generate itinerary, save itinerary, speech on, speech off, open cart, or logout."
+            reply = pfx + "Say Hey PathEase, then commands like go home, open maps, open itinerary, open place Gateway of India, add to cart, generate itinerary, save itinerary, speech on, speech off, open cart, or logout."
             return [], reply
         return [], ""
 
     system_prompt = (
-        "You are PathEase Voice Assistant Command Router.\n"
+        "You are Pathease Assistant, a friendly, accessibility-focused travel voice assistant.\n"
         "Convert user speech into STRICT JSON with fields: reply, actions.\n"
         "actions is an array of objects.\n"
         "Allowed action types:\n"
@@ -923,11 +909,12 @@ def voice_assistant():
         "- logout: {\"type\":\"logout\"}\n"
         "Rules:\n"
         "1) Output ONLY JSON.\n"
-        "2) Keep reply short and natural.\n"
-        "3) If command unknown, return empty actions and a helpful reply.\n"
-        "4) For open place/add/remove commands include place name if spoken.\n"
-        "5) For set commands include value.\n"
-        "6) If user says help, include no dangerous actions.\n"
+        "2) reply must begin with 'Pathease Assistant: ' and be 1–3 short sentences.\n"
+        "3) Friendly, supportive tone. Focus on tourism, accessibility, navigation.\n"
+        "4) If asking about a place, include accessibility tips when possible.\n"
+        "5) If unknown, reply: \"I'm sorry, I don't have that information yet, but I can help you explore other accessible destinations.\"\n"
+        "6) For open/add/remove include place name if spoken; for set commands include value.\n"
+        "7) If user says help, include no dangerous actions.\n"
     )
 
     user_prompt = (
@@ -1030,8 +1017,8 @@ def voice_assistant():
 
     local_actions, local_reply = _local_voice_parse(transcript)
     if local_actions or local_reply:
-        return jsonify({"reply": (local_reply or "Done."), "actions": local_actions, "source": "local"})
-    return jsonify({"reply": "Sorry, I could not process that command clearly. Please try again.", "actions": [], "source": "fallback", "llm_error": llm_err})
+        return jsonify({"reply": (local_reply or "Pathease Assistant: Done."), "actions": local_actions, "source": "local"})
+    return jsonify({"reply": "Pathease Assistant: Sorry, I could not process that command clearly. Please try again.", "actions": [], "source": "fallback", "llm_error": llm_err})
 
 @ai_features.route("/ai/sentiment", methods=["POST"])
 def sentiment():
