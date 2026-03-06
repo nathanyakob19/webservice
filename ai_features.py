@@ -275,6 +275,28 @@ def _basic_sentiment(text):
         label = "neutral"
     return {"label": label, "score": score, "word_count": len(tokens)}
 
+
+def _extract_first_json_object(text):
+    if not text:
+        return None
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```[a-zA-Z]*\s*", "", cleaned)
+        cleaned = re.sub(r"\s*```$", "", cleaned)
+    try:
+        return json.loads(cleaned)
+    except Exception:
+        pass
+
+    start = cleaned.find("{")
+    end = cleaned.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return None
+    try:
+        return json.loads(cleaned[start : end + 1])
+    except Exception:
+        return None
+
 @ai_features.route("/ai/guide-chat", methods=["POST"])
 def guide_chat():
     data = request.get_json(silent=True) or {}
@@ -708,6 +730,137 @@ def guide_chat():
     fallback_reply = _chatty_fallback(message, dest, d_days, d_budget)
     return jsonify({"reply": fallback_reply, "source": "fallback", "llm_error": llm_err})
 
+
+@ai_features.route("/ai/voice-assistant", methods=["POST"])
+def voice_assistant():
+    data = request.get_json(silent=True) or {}
+    transcript = (data.get("message") or "").strip()
+    language = normalize_lang((data.get("language") or "en").split("-")[0].lower())
+    current_path = (data.get("current_path") or "").strip()
+    if not transcript:
+        return jsonify({"error": "Message is required"}), 400
+
+    system_prompt = (
+        "You are PathEase Voice Assistant Command Router.\n"
+        "Convert user speech into STRICT JSON with fields: reply, actions.\n"
+        "actions is an array of objects.\n"
+        "Allowed action types:\n"
+        "- navigate: {\"type\":\"navigate\",\"path\":\"/...\"}\n"
+        "- toggle_speech: {\"type\":\"toggle_speech\",\"enabled\":true|false}\n"
+        "- toggle_quick_menu: {\"type\":\"toggle_quick_menu\",\"open\":true|false}\n"
+        "- toggle_accessibility: {\"type\":\"toggle_accessibility\"}\n"
+        "- voice_event: {\"type\":\"voice_event\",\"event_type\":\"open-place|close-place|add-to-cart|remove-from-cart|generate-itinerary|save-itinerary|set-destination|set-days|set-budget|set-travel-type|set-interests|set-currency|use-current-location\",\"name\":\"optional\",\"value\":\"optional\"}\n"
+        "- logout: {\"type\":\"logout\"}\n"
+        "Rules:\n"
+        "1) Output ONLY JSON.\n"
+        "2) Keep reply short and natural.\n"
+        "3) If command unknown, return empty actions and a helpful reply.\n"
+        "4) For open place/add/remove commands include place name if spoken.\n"
+        "5) For set commands include value.\n"
+        "6) If user says help, include no dangerous actions.\n"
+    )
+
+    user_prompt = (
+        f"Language: {language}\n"
+        f"Current route: {current_path or '/'}\n"
+        f"User speech: {transcript}\n"
+        "Return JSON now."
+    )
+
+    llm_text, llm_err = call_llm(system_prompt, user_prompt)
+    parsed = _extract_first_json_object(llm_text or "")
+    if isinstance(parsed, dict):
+        reply = str(parsed.get("reply") or "").strip()
+        actions = parsed.get("actions")
+        if not isinstance(actions, list):
+            actions = []
+        sanitized_actions = []
+        allowed_types = {
+            "navigate",
+            "toggle_speech",
+            "toggle_quick_menu",
+            "toggle_accessibility",
+            "voice_event",
+            "logout",
+        }
+        allowed_paths = {
+            "/",
+            "/maps",
+            "/admin",
+            "/upload",
+            "/guardian-request",
+            "/guardian-tracking",
+            "/ai-chat",
+            "/ai-itinerary",
+            "/ai-sentiment",
+            "/itinerary",
+            "/profile",
+            "/accessibility",
+            "/cart",
+            "/login",
+        }
+        allowed_voice_events = {
+            "open-place",
+            "close-place",
+            "add-to-cart",
+            "remove-from-cart",
+            "generate-itinerary",
+            "save-itinerary",
+            "set-destination",
+            "set-days",
+            "set-budget",
+            "set-travel-type",
+            "set-interests",
+            "set-currency",
+            "use-current-location",
+        }
+
+        for action in actions[:8]:
+            if not isinstance(action, dict):
+                continue
+            a_type = str(action.get("type") or "").strip()
+            if a_type not in allowed_types:
+                continue
+            if a_type == "navigate":
+                path = str(action.get("path") or "").strip()
+                if path in allowed_paths:
+                    sanitized_actions.append({"type": "navigate", "path": path})
+                continue
+            if a_type == "toggle_speech":
+                sanitized_actions.append({"type": "toggle_speech", "enabled": bool(action.get("enabled"))})
+                continue
+            if a_type == "toggle_quick_menu":
+                sanitized_actions.append({"type": "toggle_quick_menu", "open": bool(action.get("open"))})
+                continue
+            if a_type == "toggle_accessibility":
+                sanitized_actions.append({"type": "toggle_accessibility"})
+                continue
+            if a_type == "logout":
+                sanitized_actions.append({"type": "logout"})
+                continue
+            if a_type == "voice_event":
+                event_type = str(action.get("event_type") or "").strip()
+                if event_type in allowed_voice_events:
+                    payload = {"type": "voice_event", "event_type": event_type}
+                    if action.get("name") is not None:
+                        payload["name"] = str(action.get("name"))
+                    if action.get("value") is not None:
+                        payload["value"] = str(action.get("value"))
+                    sanitized_actions.append(payload)
+                continue
+
+        if reply:
+            return jsonify({"reply": reply, "actions": sanitized_actions, "source": "nvidia"})
+        if sanitized_actions:
+            return jsonify({"reply": "Done.", "actions": sanitized_actions, "source": "nvidia"})
+
+    return jsonify({
+        "reply": "Sorry, I could not process that command clearly. Please try again.",
+        "actions": [],
+        "source": "fallback",
+        "llm_error": llm_err,
+    })
+
 @ai_features.route("/ai/sentiment", methods=["POST"])
 def sentiment():
     data = request.get_json(silent=True) or {}
@@ -1102,4 +1255,3 @@ def trip_planner():
         print("ERROR: /ai/trip-planner exception")
         print(traceback.format_exc())
         return jsonify({"error": "Internal server error", "details": str(e)}), 500
-
