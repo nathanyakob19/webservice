@@ -903,6 +903,18 @@ def voice_assistant():
         if t.startswith("help"):
             reply = pfx + "Say Hey PathEase, then commands like go home, open maps, open itinerary, open place Gateway of India, add to cart, generate itinerary, save itinerary, speech on, speech off, open cart, or logout."
             return [], reply
+        if re.search(r"\b(hi|hello|hey|good morning|good afternoon|good evening)\b", t):
+            reply = pfx + "Hello. I can help with routes, accessibility, places, and trip planning. Ask me anything travel related."
+            return [], reply
+        if "how are you" in t:
+            reply = pfx + "I am doing great and ready to help you explore."
+            return [], reply
+        if "which place is better" in t or t.startswith("compare "):
+            reply = pfx + "Please tell me two place names. I will compare accessibility, travel time, and crowd level."
+            return [], reply
+        if "best place" in t or "recommend place" in t or "where should i go" in t:
+            reply = pfx + "Tell me your city, budget, and interests. I will suggest the best accessible places for your trip."
+            return [], reply
         return [], ""
 
     # Fast path: deterministic local commands should not wait on external LLM.
