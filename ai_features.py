@@ -722,6 +722,15 @@ def voice_assistant():
     transcript = (data.get("message") or "").strip()
     language = normalize_lang((data.get("language") or "en").split("-")[0].lower())
     current_path = (data.get("current_path") or "").strip()
+    print(
+        "[voice-assistant] received",
+        {
+            "path": current_path or "/",
+            "lang": language,
+            "chars": len(transcript),
+            "preview": transcript[:80],
+        },
+    )
     if not transcript:
         return jsonify({"error": "Message is required"}), 400
 
@@ -899,6 +908,10 @@ def voice_assistant():
     # Fast path: deterministic local commands should not wait on external LLM.
     local_actions, local_reply = _local_voice_parse(transcript)
     if local_actions or local_reply:
+        print(
+            "[voice-assistant] local",
+            {"actions": len(local_actions), "has_reply": bool(local_reply)},
+        )
         return jsonify(
             {
                 "reply": (local_reply or "Pathease Assistant: Done."),
@@ -1022,10 +1035,19 @@ def voice_assistant():
                 continue
 
         if reply:
+            print(
+                "[voice-assistant] llm",
+                {"actions": len(sanitized_actions), "has_reply": True},
+            )
             return jsonify({"reply": reply, "actions": sanitized_actions, "source": "nvidia"})
         if sanitized_actions:
+            print("[voice-assistant] llm", {"actions": len(sanitized_actions), "has_reply": False})
             return jsonify({"reply": "Done.", "actions": sanitized_actions, "source": "nvidia"})
 
+    print(
+        "[voice-assistant] fallback",
+        {"actions": 0, "has_reply": True, "llm_error": bool(llm_err)},
+    )
     return jsonify({"reply": "Pathease Assistant: Sorry, I could not process that command clearly. Please try again.", "actions": [], "source": "fallback", "llm_error": llm_err})
 
 @ai_features.route("/ai/sentiment", methods=["POST"])
