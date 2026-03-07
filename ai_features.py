@@ -908,6 +908,8 @@ def voice_assistant():
     # Fast path: deterministic local commands should not wait on external LLM.
     local_actions, local_reply = _local_voice_parse(transcript)
     if local_actions or local_reply:
+        if not local_actions and "invalid command" in (local_reply or "").lower():
+            local_reply = "Pathease Assistant: Invalid command. Say help to hear commands."
         print(
             "[voice-assistant] local",
             {"actions": len(local_actions), "has_reply": bool(local_reply)},
@@ -1048,7 +1050,7 @@ def voice_assistant():
         "[voice-assistant] fallback",
         {"actions": 0, "has_reply": True, "llm_error": bool(llm_err)},
     )
-    return jsonify({"reply": "Pathease Assistant: Sorry, I could not process that command clearly. Please try again.", "actions": [], "source": "fallback", "llm_error": llm_err})
+    return jsonify({"reply": "Pathease Assistant: Invalid command. Say help to hear commands.", "actions": [], "source": "fallback", "llm_error": llm_err})
 
 @ai_features.route("/ai/sentiment", methods=["POST"])
 def sentiment():
