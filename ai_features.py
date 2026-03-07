@@ -896,6 +896,17 @@ def voice_assistant():
             return [], reply
         return [], ""
 
+    # Fast path: deterministic local commands should not wait on external LLM.
+    local_actions, local_reply = _local_voice_parse(transcript)
+    if local_actions or local_reply:
+        return jsonify(
+            {
+                "reply": (local_reply or "Pathease Assistant: Done."),
+                "actions": local_actions,
+                "source": "local",
+            }
+        )
+
     system_prompt = (
         "You are Pathease Assistant, a friendly, accessibility-focused travel voice assistant.\n"
         "Convert user speech into STRICT JSON with fields: reply, actions.\n"
@@ -924,7 +935,7 @@ def voice_assistant():
         "Return JSON now."
     )
 
-    llm_text, llm_err = call_llm(system_prompt, user_prompt)
+    llm_text, llm_err = call_llm(system_prompt, user_prompt, timeout=8)
     parsed = _extract_first_json_object(llm_text or "")
     if isinstance(parsed, dict):
         reply = str(parsed.get("reply") or "").strip()
@@ -1015,9 +1026,6 @@ def voice_assistant():
         if sanitized_actions:
             return jsonify({"reply": "Done.", "actions": sanitized_actions, "source": "nvidia"})
 
-    local_actions, local_reply = _local_voice_parse(transcript)
-    if local_actions or local_reply:
-        return jsonify({"reply": (local_reply or "Pathease Assistant: Done."), "actions": local_actions, "source": "local"})
     return jsonify({"reply": "Pathease Assistant: Sorry, I could not process that command clearly. Please try again.", "actions": [], "source": "fallback", "llm_error": llm_err})
 
 @ai_features.route("/ai/sentiment", methods=["POST"])
@@ -1029,7 +1037,7 @@ def sentiment():
     return jsonify(_basic_sentiment(text))
 
 # ---------------- FREE AI (UNCHANGED) ----------------
-def call_llm(system_prompt, user_prompt):
+def call_llm(system_prompt, user_prompt, timeout=30):
     api_key = (
         read_env_value("NVIDIA_API_KEY", "").strip()
         or read_env_value("LLM_API_KEY", "").strip()
@@ -1063,7 +1071,7 @@ def call_llm(system_prompt, user_prompt):
 
     try:
         req = Request(api_base, data=json.dumps(payload).encode(), headers=headers)
-        with urlopen(req, timeout=30) as r:
+        with urlopen(req, timeout=timeout) as r:
             data = json.loads(r.read().decode())
             content = (
                 data.get("choices", [{}])[0]
