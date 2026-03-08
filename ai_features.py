@@ -917,23 +917,6 @@ def voice_assistant():
             return [], reply
         return [], ""
 
-    # Fast path: deterministic local commands should not wait on external LLM.
-    local_actions, local_reply = _local_voice_parse(transcript)
-    if local_actions or local_reply:
-        if not local_actions and "invalid command" in (local_reply or "").lower():
-            local_reply = "Pathease Assistant: Invalid command. Say help to hear commands."
-        print(
-            "[voice-assistant] local",
-            {"actions": len(local_actions), "has_reply": bool(local_reply)},
-        )
-        return jsonify(
-            {
-                "reply": (local_reply or "Pathease Assistant: Done."),
-                "actions": local_actions,
-                "source": "local",
-            }
-        )
-
     system_prompt = (
         "You are Pathease Assistant, a friendly, accessibility-focused travel voice assistant.\n"
         "Convert user speech into STRICT JSON with fields: reply, actions.\n"
@@ -962,6 +945,7 @@ def voice_assistant():
         "Return JSON now."
     )
 
+    # NVIDIA-first: attempt LLM intent parsing before local fallback.
     llm_text, llm_err = call_llm(system_prompt, user_prompt, timeout=8)
     parsed = _extract_first_json_object(llm_text or "")
     if isinstance(parsed, dict):
@@ -1057,6 +1041,24 @@ def voice_assistant():
         if sanitized_actions:
             print("[voice-assistant] llm", {"actions": len(sanitized_actions), "has_reply": False})
             return jsonify({"reply": "Done.", "actions": sanitized_actions, "source": "nvidia"})
+
+    # Deterministic-safe fallback when LLM is unavailable/unclear.
+    local_actions, local_reply = _local_voice_parse(transcript)
+    if local_actions or local_reply:
+        if not local_actions and "invalid command" in (local_reply or "").lower():
+            local_reply = "Pathease Assistant: Invalid command. Say help to hear commands."
+        print(
+            "[voice-assistant] local",
+            {"actions": len(local_actions), "has_reply": bool(local_reply), "llm_error": bool(llm_err)},
+        )
+        return jsonify(
+            {
+                "reply": (local_reply or "Pathease Assistant: Done."),
+                "actions": local_actions,
+                "source": "local",
+                "llm_error": llm_err,
+            }
+        )
 
     print(
         "[voice-assistant] fallback",
