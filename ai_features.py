@@ -734,6 +734,22 @@ def voice_assistant():
     if not transcript:
         return jsonify({"error": "Message is required"}), 400
 
+    def _is_invalid_input(text):
+        t = (text or "").strip().lower()
+        if not t or len(t) < 2:
+            return True
+        if not re.search(r"[a-z0-9\u0900-\u097f]", t):
+            return True
+        words = [w for w in re.split(r"\s+", t) if w]
+        if not words:
+            return True
+        fillers = {"um", "uh", "hmm", "huh", "aaa", "aa"}
+        if all(w in fillers for w in words):
+            return True
+        if re.fullmatch(r"(.)\1{4,}", t):
+            return True
+        return False
+
     def _local_voice_parse(text):
         t = (text or "").lower().strip()
         actions = []
@@ -916,6 +932,16 @@ def voice_assistant():
             reply = pfx + "Tell me your city, budget, and interests. I will suggest the best accessible places for your trip."
             return [], reply
         return [], ""
+
+    if _is_invalid_input(transcript):
+        print("[voice-assistant] invalid-input")
+        return jsonify(
+            {
+                "reply": "Pathease Assistant: Invalid command. Say help to hear commands.",
+                "actions": [],
+                "source": "invalid-input",
+            }
+        )
 
     system_prompt = (
         "You are Pathease Assistant, a friendly, accessibility-focused travel voice assistant.\n"
