@@ -10,6 +10,7 @@ import jwt
 import os
 import json
 import math
+import re
 from uuid import uuid4
 from datetime import datetime, timedelta
 from ai_features import ai_features
@@ -911,13 +912,24 @@ def search_places():
     q = (request.args.get("q") or "").strip()
     if not q:
         return jsonify([])
-    regex = {"$regex": q, "$options": "i"}
+    raw_regex = {"$regex": re.escape(q), "$options": "i"}
+    tokens = [t for t in re.split(r"\s+", q.lower()) if t]
+    token_patterns = []
+    for t in tokens:
+        if len(t) > 3 and t.endswith("s"):
+            t = t[:-1]
+        token_patterns.append(f"{re.escape(t)}s?")
+    flexible = ".*".join(token_patterns) if token_patterns else re.escape(q)
+    flex_regex = {"$regex": flexible, "$options": "i"}
     results = list(places_collection.find({
         "approved": True,
         "$or": [
-            {"placeName": regex},
-            {"description": regex},
-            {"city": regex},
+            {"placeName": raw_regex},
+            {"placeName": flex_regex},
+            {"description": raw_regex},
+            {"description": flex_regex},
+            {"city": raw_regex},
+            {"city": flex_regex},
         ]
     }))
     for p in results:
