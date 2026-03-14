@@ -37,15 +37,27 @@ CORS(
 )
 
 
-@app.after_request
-def add_cors_headers(response):
+def _apply_cors_headers(response):
     origin = request.headers.get("Origin")
     if origin and origin in ALLOWED_CORS_ORIGINS:
         response.headers["Access-Control-Allow-Origin"] = origin
         response.headers["Vary"] = "Origin"
         response.headers["Access-Control-Allow-Methods"] = "GET,POST,PUT,DELETE,OPTIONS"
         response.headers["Access-Control-Allow-Headers"] = "Content-Type,Authorization"
+        response.headers["Access-Control-Max-Age"] = "86400"
     return response
+
+
+@app.before_request
+def handle_cors_preflight():
+    if request.method == "OPTIONS":
+        return _apply_cors_headers(app.make_default_options_response())
+
+
+@app.after_request
+def add_cors_headers(response):
+    return _apply_cors_headers(response)
+
 
 # ---------------- CONFIG ----------------
 def _build_upload_folder():
@@ -139,6 +151,86 @@ def calculate_distance(lat1, lon1, lat2, lon2):
 
 def normalize_email(email):
     return email.lower().strip()
+
+def get_user_or_404(email):
+    normalized = normalize_email(email)
+    if not normalized:
+        return None, (jsonify({"error": "Email required"}), 400)
+    user = users_collection.find_one({"email": normalized})
+    if not user:
+        return None, (jsonify({"error": "User not found"}), 404)
+    return user, None
+
+def normalize_cart_item(item):
+    if not isinstance(item, dict):
+        return None
+    place_name = (item.get("placeName") or "").strip()
+    if not place_name:
+        return None
+    normalized = {
+        "_id": str(item.get("_id") or "").strip() or str(ObjectId()),
+        "placeName": place_name,
+        "image": item.get("image"),
+        "distance": item.get("distance"),
+    }
+    return normalized
+
+def normalize_stop(stop):
+    if isinstance(stop, str):
+        stop = {"name": stop}
+    if not isinstance(stop, dict):
+        return None
+    name = (stop.get("name") or "").strip()
+    if not name:
+        return None
+    normalized = {"name": name}
+    for key in ["lat", "lng", "distance_km"]:
+        if stop.get(key) is not None:
+            normalized[key] = stop.get(key)
+    return normalized
+
+def normalize_itinerary_day(day, index):
+    if not isinstance(day, dict):
+        day = {}
+    normalized = {
+        "day": day.get("day") if day.get("day") is not None else index + 1,
+        "title": (day.get("title") or f"Day {index + 1}").strip(),
+        "morning": day.get("morning") or "",
+        "afternoon": day.get("afternoon") or "",
+        "evening": day.get("evening") or "",
+        "tips": day.get("tips") or "",
+    }
+    if day.get("est_cost") is not None:
+        normalized["est_cost"] = day.get("est_cost")
+    if day.get("currency") is not None:
+        normalized["currency"] = day.get("currency")
+    if day.get("currency_symbol") is not None:
+        normalized["currency_symbol"] = day.get("currency_symbol")
+    if day.get("day_distance_km") is not None:
+        normalized["day_distance_km"] = day.get("day_distance_km")
+    stops = [normalize_stop(stop) for stop in (day.get("stops") or [])]
+    normalized["stops"] = [stop for stop in stops if stop]
+    return normalized
+
+def normalize_itinerary_plan(plan):
+    if not isinstance(plan, dict):
+        return None
+    title = (plan.get("title") or "Trip Itinerary").strip()
+    itinerary = [
+        normalize_itinerary_day(day, idx)
+        for idx, day in enumerate(plan.get("itinerary") or [])
+    ]
+    normalized = {
+        "id": str(plan.get("id") or f"plan-{uuid4().hex}"),
+        "title": title,
+        "destination": (plan.get("destination") or "").strip(),
+        "created_at": plan.get("created_at") or datetime.utcnow().isoformat(),
+        "itinerary": itinerary,
+        "notes": plan.get("notes") or "",
+        "meta": plan.get("meta") if isinstance(plan.get("meta"), dict) else {},
+        "updatedAt": datetime.utcnow().isoformat(),
+    }
+    return normalized
 
 def normalize_location(loc):
     try:
@@ -766,8 +858,163 @@ def profile_activity():
             "overall_avg": overall_avg,
             "feature_avg": ratings_avg,
             "count": total_count
-        }
+        },
+        "itinerary_count": len(user.get("itineraries") or []) if (user := users_collection.find_one({"email": email}, {"itineraries": 1})) else 0
     })
+
+@app.route("/user/cart", methods=["POST"])
+def get_user_cart():
+    email = normalize_email((request.json or {}).get("email", ""))
+    user, error = get_user_or_404(email)
+    if error:
+        return error
+    return jsonify({"items": user.get("itinerary_cart") or []})
+
+@app.route("/user/cart/add", methods=["POST"])
+def add_user_cart_item():
+    data = request.json or {}
+    email = normalize_email(data.get("email", ""))
+    item = normalize_cart_item(data.get("item"))
+    if not item:
+        return jsonify({"error": "Valid cart item required"}), 400
+
+    user, error = get_user_or_404(email)
+    if error:
+        return error
+
+    cart = user.get("itinerary_cart") or []
+    exists = any(
+        (c.get("_id") and c.get("_id") == item["_id"]) or
+        ((c.get("placeName") or "").strip().lower() == item["placeName"].lower())
+        for c in cart
+    )
+    if not exists:
+        cart.append(item)
+        users_collection.update_one(
+            {"email": email},
+            {"$set": {"itinerary_cart": cart, "travelUpdatedAt": datetime.utcnow()}}
+        )
+    return jsonify({"items": cart})
+
+@app.route("/user/cart/remove", methods=["POST"])
+def remove_user_cart_item():
+    data = request.json or {}
+    email = normalize_email(data.get("email", ""))
+    item_id = str(data.get("item_id") or "").strip()
+    place_name = (data.get("placeName") or "").strip().lower()
+
+    if not item_id and not place_name:
+        return jsonify({"error": "item_id or placeName required"}), 400
+
+    user, error = get_user_or_404(email)
+    if error:
+        return error
+
+    cart = user.get("itinerary_cart") or []
+    next_cart = [
+        c for c in cart
+        if not (
+            (item_id and str(c.get("_id") or "").strip() == item_id) or
+            (place_name and (c.get("placeName") or "").strip().lower() == place_name)
+        )
+    ]
+    users_collection.update_one(
+        {"email": email},
+        {"$set": {"itinerary_cart": next_cart, "travelUpdatedAt": datetime.utcnow()}}
+    )
+    return jsonify({"items": next_cart})
+
+@app.route("/user/cart/clear", methods=["POST"])
+def clear_user_cart():
+    email = normalize_email((request.json or {}).get("email", ""))
+    _user, error = get_user_or_404(email)
+    if error:
+        return error
+    users_collection.update_one(
+        {"email": email},
+        {"$set": {"itinerary_cart": [], "travelUpdatedAt": datetime.utcnow()}}
+    )
+    return jsonify({"items": []})
+
+@app.route("/user/itineraries", methods=["POST"])
+def get_user_itineraries():
+    email = normalize_email((request.json or {}).get("email", ""))
+    user, error = get_user_or_404(email)
+    if error:
+        return error
+    return jsonify({"items": user.get("itineraries") or []})
+
+@app.route("/user/itineraries/create", methods=["POST"])
+def create_user_itinerary():
+    data = request.json or {}
+    email = normalize_email(data.get("email", ""))
+    plan = normalize_itinerary_plan(data.get("plan"))
+    if not plan:
+        return jsonify({"error": "Valid itinerary plan required"}), 400
+
+    user, error = get_user_or_404(email)
+    if error:
+        return error
+
+    itineraries = user.get("itineraries") or []
+    itineraries.insert(0, plan)
+    users_collection.update_one(
+        {"email": email},
+        {"$set": {"itineraries": itineraries, "travelUpdatedAt": datetime.utcnow()}}
+    )
+    return jsonify({"item": plan, "items": itineraries})
+
+@app.route("/user/itineraries/update", methods=["POST"])
+def update_user_itinerary():
+    data = request.json or {}
+    email = normalize_email(data.get("email", ""))
+    plan = normalize_itinerary_plan(data.get("plan"))
+    if not plan:
+        return jsonify({"error": "Valid itinerary plan required"}), 400
+
+    user, error = get_user_or_404(email)
+    if error:
+        return error
+
+    itineraries = user.get("itineraries") or []
+    updated = False
+    next_items = []
+    for existing in itineraries:
+        if str(existing.get("id")) == plan["id"]:
+            if not plan.get("created_at"):
+                plan["created_at"] = existing.get("created_at") or datetime.utcnow().isoformat()
+            next_items.append(plan)
+            updated = True
+        else:
+            next_items.append(existing)
+    if not updated:
+        return jsonify({"error": "Itinerary not found"}), 404
+
+    users_collection.update_one(
+        {"email": email},
+        {"$set": {"itineraries": next_items, "travelUpdatedAt": datetime.utcnow()}}
+    )
+    return jsonify({"item": plan, "items": next_items})
+
+@app.route("/user/itineraries/delete", methods=["POST"])
+def delete_user_itinerary():
+    data = request.json or {}
+    email = normalize_email(data.get("email", ""))
+    itinerary_id = str(data.get("itinerary_id") or "").strip()
+    if not itinerary_id:
+        return jsonify({"error": "itinerary_id required"}), 400
+
+    user, error = get_user_or_404(email)
+    if error:
+        return error
+
+    itineraries = user.get("itineraries") or []
+    next_items = [item for item in itineraries if str(item.get("id")) != itinerary_id]
+    users_collection.update_one(
+        {"email": email},
+        {"$set": {"itineraries": next_items, "travelUpdatedAt": datetime.utcnow()}}
+    )
+    return jsonify({"items": next_items})
 
 @app.route("/update-profile", methods=["POST"])
 def update_profile():
