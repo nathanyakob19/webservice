@@ -379,7 +379,13 @@ def login():
         "name": user.get("name"),
         "email": email,
         "role": user.get("role", "user"),
-        "user": {"name": user.get("name"), "email": email, "role": user.get("role", "user")}
+        "avatar": user.get("avatar"),
+        "user": {
+            "name": user.get("name"),
+            "email": email,
+            "role": user.get("role", "user"),
+            "avatar": user.get("avatar"),
+        }
     })
 
 # ---------------- AI CHATBOT ----------------
@@ -787,7 +793,7 @@ def get_profile():
         "name": user.get("name"),
         "email": user.get("email"),
         "role": user.get("role", "user"),
-        "avatar": user.get("avatar")
+        "avatar": resolve_image(user.get("avatar"))
     })
 
 @app.route("/profile/activity", methods=["POST"])
@@ -1044,7 +1050,7 @@ def upload_profile_pic():
     result = users_collection.update_one({"email": email}, {"$set": {"avatar": filename}})
     if result.matched_count == 0:
         return jsonify({"error": "User not found"}), 404
-    return jsonify({"message": "Profile image updated", "avatar": filename})
+    return jsonify({"message": "Profile image updated", "avatar": resolve_image(filename)})
 
 @app.route("/admin/users")
 def admin_users():
