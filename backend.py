@@ -818,6 +818,7 @@ def profile_activity():
             if (r.get("email") or "") == email:
                 comments.append({
                     "place_id": str(p["_id"]),
+                    "review_id": r.get("review_id"),
                     "placeName": p.get("placeName"),
                     "comment": r.get("comment"),
                     "approved": r.get("approved", False),
@@ -841,6 +842,7 @@ def profile_activity():
                     "place_id": str(p["_id"]),
                     "placeName": p.get("placeName"),
                     "filename": resolve_image(up.get("filename")),
+                    "stored_filename": up.get("filename"),
                     "uploadedAt": up.get("uploadedAt").isoformat() if up.get("uploadedAt") else None
                 })
 
@@ -1035,6 +1037,97 @@ def update_profile():
         update["avatar"] = data.get("avatar")
     users_collection.update_one({"email": email}, {"$set": update})
     return jsonify({"message": "Profile updated"})
+
+@app.route("/profile/comment/delete", methods=["POST"])
+def delete_own_comment():
+    data = request.json or {}
+    email = normalize_email(data.get("email", ""))
+    review_id = str(data.get("review_id") or "").strip()
+    place_id = str(data.get("place_id") or "").strip()
+
+    if not email or not review_id or not place_id:
+        return jsonify({"error": "email, place_id and review_id required"}), 400
+
+    try:
+        oid = ObjectId(place_id)
+    except InvalidId:
+        return jsonify({"error": "Invalid place id"}), 400
+
+    place = places_collection.find_one({"_id": oid}, {"reviews": 1})
+    reviews = place.get("reviews", []) if place else []
+    next_reviews = [
+        r for r in reviews
+        if not (
+            str(r.get("review_id") or "").strip() == review_id and
+            normalize_email(r.get("email", "")) == email
+        )
+    ]
+    if len(next_reviews) == len(reviews):
+        return jsonify({"error": "Comment not found or not owned by user"}), 404
+
+    places_collection.update_one({"_id": oid}, {"$set": {"reviews": next_reviews}})
+    return jsonify({"message": "Comment deleted"})
+
+@app.route("/profile/upload/delete", methods=["POST"])
+def delete_own_uploaded_image():
+    data = request.json or {}
+    email = normalize_email(data.get("email", ""))
+    place_id = str(data.get("place_id") or "").strip()
+    stored_filename = str(data.get("stored_filename") or "").strip()
+
+    if not email or not place_id or not stored_filename:
+        return jsonify({"error": "email, place_id and stored_filename required"}), 400
+
+    try:
+        oid = ObjectId(place_id)
+    except InvalidId:
+        return jsonify({"error": "Invalid place id"}), 400
+
+    place = places_collection.find_one({"_id": oid}) or {}
+    uploads = place.get("images_uploads") or []
+    owns_upload = any(
+        (up.get("filename") or "") == stored_filename and normalize_email(up.get("uploadedBy", "")) == email
+        for up in uploads
+    )
+    if not owns_upload:
+        return jsonify({"error": "Upload not found or not owned by user"}), 404
+
+    next_uploads = [
+        up for up in uploads
+        if not (
+            (up.get("filename") or "") == stored_filename and
+            normalize_email(up.get("uploadedBy", "")) == email
+        )
+    ]
+    next_images = [img for img in (place.get("images") or []) if img != stored_filename]
+    current_primary = image_to_stored_name(place.get("image"))
+    next_primary = place.get("image")
+    if current_primary == stored_filename:
+        next_primary = next_images[0] if next_images else None
+
+    places_collection.update_one(
+        {"_id": oid},
+        {
+            "$set": {
+                "images_uploads": next_uploads,
+                "images": next_images,
+                "image": next_primary,
+                "updatedAt": datetime.utcnow(),
+            }
+        },
+    )
+    return jsonify({"message": "Upload deleted"})
+
+@app.route("/profile/avatar/delete", methods=["POST"])
+def delete_profile_avatar():
+    email = normalize_email((request.json or {}).get("email", ""))
+    if not email:
+        return jsonify({"error": "Email required"}), 400
+
+    result = users_collection.update_one({"email": email}, {"$set": {"avatar": None}})
+    if result.matched_count == 0:
+        return jsonify({"error": "User not found"}), 404
+    return jsonify({"message": "Profile image deleted"})
 
 @app.route("/upload-profile-pic", methods=["POST"])
 def upload_profile_pic():
