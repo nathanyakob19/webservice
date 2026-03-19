@@ -332,7 +332,7 @@ def guide_chat():
     )
     content, llm_err = call_llm(system_prompt, user_prompt)
     if content:
-        return jsonify({"reply": content.strip()})
+        return jsonify({"reply": content.strip(), "source": "llm", "llm_error": None})
 
     def _extract_params(text, existing_dest):
         dest = existing_dest
@@ -713,6 +713,15 @@ def guide_chat():
 
     dest, d_days, d_budget, d_modes = _extract_params(message, destination)
     fallback_reply = _chatty_fallback(message, dest, d_days, d_budget)
+    print(
+        "[guide-chat] fallback",
+        {
+            "destination": dest,
+            "language": language,
+            "llm_error": llm_err,
+            "message_preview": message[:100],
+        },
+    )
     return jsonify({"reply": fallback_reply, "source": "fallback", "llm_error": llm_err})
 
 
