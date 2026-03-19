@@ -99,6 +99,18 @@ places_collection = db["places"] if db is not None else None
 def normalize_lang(lang):
     return lang if lang in SUPPORTED_LANGS else "en"
 
+def normalize_chat_history(history):
+    out = []
+    for item in history or []:
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role") or "").strip().lower()
+        text = str(item.get("text") or "").strip()
+        if role not in {"user", "assistant"} or not text:
+            continue
+        out.append({"role": role, "text": text[:1000]})
+    return out[-8:]
+
 def safe_int(v, d=1):
     try:
         return max(1, int(v))
@@ -302,6 +314,7 @@ def guide_chat():
     data = request.get_json(silent=True) or {}
     message = (data.get("message") or "").strip()
     destination = (data.get("destination") or "").strip()
+    chat_history = normalize_chat_history(data.get("history") or [])
     language = normalize_lang(data.get("language") or "en")
     user_lat = data.get("lat")
     user_lng = data.get("lng")
@@ -313,6 +326,25 @@ def guide_chat():
         user_lng = None
     if not message:
         return jsonify({"error": "Message is required"}), 400
+
+    def _infer_destination_from_history(items):
+        for item in reversed(items):
+            if item.get("role") != "user":
+                continue
+            text = item.get("text") or ""
+            for pattern in [
+                r"\bweather in\s+([a-zA-Z][a-zA-Z\s\-']+)",
+                r"\btrip to\s+([a-zA-Z][a-zA-Z\s\-']+)",
+                r"\btravel to\s+([a-zA-Z][a-zA-Z\s\-']+)",
+                r"\bvisit\s+([a-zA-Z][a-zA-Z\s\-']+)",
+            ]:
+                match = re.search(pattern, text, re.I)
+                if match:
+                    return match.group(1).strip(" .?!")
+        return ""
+
+    if not destination:
+        destination = _infer_destination_from_history(chat_history)
 
     system_prompt = (
         "You are Pathease Assistant, a friendly, accessibility-focused tourism voice assistant.\n"
@@ -328,6 +360,29 @@ def guide_chat():
     user_prompt = (
         f"Language: {language}\n"
         f"Destination: {destination or 'Not specified'}\n"
+        f"User message: {message}\n"
+    )
+    history_lines = "\n".join(
+        f"{item['role'].title()}: {item['text']}"
+        for item in chat_history
+    ) or "No prior conversation."
+    system_prompt = (
+        "You are Pathease Assistant, a friendly tourism assistant with memory of the recent conversation.\n"
+        "Behavior:\n"
+        "- Do not restart the conversation each turn. Use recent chat history to understand follow-up messages like 'yes', 'okay', or 'tell me more'.\n"
+        "- Keep replies short and voice-friendly (1-3 sentences) unless the user explicitly requests a detailed itinerary.\n"
+        "- Help with travel planning, attractions, food, transport, safety, accessibility, and weather or climate guidance.\n"
+        "- If asked about live weather and you do not have live forecast data, say that clearly and then give useful climate or seasonal guidance for that destination.\n"
+        "- Include accessibility notes when relevant, but do not force every answer back to accessibility if the user asked a different travel question.\n"
+        "- Friendly and supportive tone. Tourism-only; avoid unrelated content.\n"
+        "When the user asks for an itinerary, provide a concise day-wise plan (Day 1/2/3) with short lines.\n"
+        "- Do not start every answer by repeating your own name.\n"
+        "Respond in the requested language."
+    )
+    user_prompt = (
+        f"Language: {language}\n"
+        f"Destination: {destination or 'Not specified'}\n"
+        f"Recent conversation:\n{history_lines}\n"
         f"User message: {message}\n"
     )
     content, llm_err = call_llm(system_prompt, user_prompt)
